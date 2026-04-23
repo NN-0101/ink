@@ -1,0 +1,121 @@
+### 构建系统 ###
+# 最重要的：忽略所有构建目录（通常叫 build、Build、*-build）
+build*/
+Build*/
+*-build/
+debug/
+release/
+x64/
+x86/
+
+# Qt 构建系统生成的文件
+Makefile*
+*.qmake.stash
+.qmake.stash
+*.pro.user
+*.pro.user.*
+*.autosave
+
+# 影子构建（Shadow build）目录
+*.pbd
+
+### Qt 特定 ###
+# Qt Creator 文件
+*.creator
+*.creator.user
+*.files
+*.includes
+*.config
+*.cflags
+*.cxxflags
+
+# QML 缓存
+.qmlc/
+
+### 编译产物 ###
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Linker files
+*.ilk
+
+# Debugger Files
+*.pdb
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# debug information files
+*.dwo
+
+### IDE ###
+# VS Code
+.vscode/
+
+# Qt Creator
+.cproject
+.project
+
+# CLion
+cmake-build-*/
+
+# Visual Studio
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.sdf
+*.opensdf
+*.suo
+*.db
+*.opendb
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+
+# idea
+*.idea/
+.DS_Store
+
+# Windows
+Thumbs.db
+[Tt]humbs.db:encryptable
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
