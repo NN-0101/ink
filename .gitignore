@@ -81,6 +81,7 @@ Makefile*
 # Qt Creator
 .cproject
 .project
+.qtcreator/
 
 # CLion
 cmake-build-*/
