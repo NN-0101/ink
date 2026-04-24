@@ -1,509 +1,1592 @@
 #include "mainwindow.h"
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QWidget>
-#include <QFile>
-#include <QFileInfo>
-#include <QDir>
-#include <QMessageBox>
-#include <QHeaderView>
-#include <QFont>
-#include <QFontDatabase>
+#include "linenumbereditor.h"
+#include "findreplacedialog.h"
 #include <QApplication>
+#include <QSplitter>
+#include <QTreeWidget>
+#include <QTabWidget>
+#include <QPlainTextEdit>
+#include <QTextEdit>
 #include <QMenuBar>
 #include <QToolBar>
 #include <QStatusBar>
-#include <QKeySequence>
+#include <QAction>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QTextStream>
+#include <QFileInfo>
+#include <QSettings>
+#include <QFont>
+#include <QFontDatabase>
+#include <QLabel>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QPushButton>
+#include <QHeaderView>
+#include <QDir>
+#include <QDebug>
+#include <QMap>
 #include <QIcon>
+#include <QShortcut>
 
-/**
- * @brief 主窗口构造函数
- * @param parent 父窗口指针
- * 
- * 构造函数初始化界面，设置窗口标题和大小。
- * 调用 setupUI() 创建界面，createFileTree() 添加示例文件。
- */
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#include <QStringConverter>
+#endif
+
+bool MainWindow::eventFilter(QObject *obj, QEvent *event)
+{
+    // 处理所有键盘事件，不仅仅是编辑器控件
+    if (event->type() == QEvent::KeyPress) {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
+
+        // 调试输出所有按键
+        qDebug() << "Key event - Object:" << obj->metaObject()->className()
+                 << "Key:" << keyEvent->key()
+                 << "Modifiers:" << keyEvent->modifiers()
+                 << "Text:" << keyEvent->text();
+
+        // 处理 Ctrl+F - 无论焦点在哪里都响应
+        if (keyEvent->modifiers() == Qt::ControlModifier && keyEvent->key() == Qt::Key_F) {
+            qDebug() << "Ctrl+F detected!";
+            showFindDialog();
+            return true;
+        }
+
+        // 处理 Ctrl+R - 无论焦点在哪里都响应
+        if (keyEvent->modifiers() == Qt::ControlModifier && keyEvent->key() == Qt::Key_R) {
+            qDebug() << "Ctrl+R detected!";
+            showReplaceDialog();
+            return true;
+        }
+
+        // 处理 F3 和 Shift+F3 - 只在编辑器中有焦点时处理
+        if (qobject_cast<QPlainTextEdit*>(obj) || qobject_cast<LineNumberEditor*>(obj)) {
+            if (keyEvent->key() == Qt::Key_F3 && keyEvent->modifiers() == Qt::NoModifier) {
+                qDebug() << "F3 detected in editor!";
+                if (m_findReplaceDialog && m_findReplaceDialog->isVisible()) {
+                    m_findReplaceDialog->findNextMatch();
+                } else {
+                    showFindDialog();
+                }
+                return true;
+            }
+            else if (keyEvent->key() == Qt::Key_F3 && keyEvent->modifiers() == Qt::ShiftModifier) {
+                qDebug() << "Shift+F3 detected in editor!";
+                if (m_findReplaceDialog && m_findReplaceDialog->isVisible()) {
+                    m_findReplaceDialog->findPrevMatch();
+                }
+                return true;
+            }
+        }
+    }
+
+    return QMainWindow::eventFilter(obj, event);
+}
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
-    , m_splitter(nullptr)
-    , m_fileTree(nullptr)
-    , m_textEdit(nullptr)
-    , m_menuBar(nullptr)
-    , m_fileMenu(nullptr)
-    , m_editMenu(nullptr)
-    , m_viewMenu(nullptr)
-    , m_helpMenu(nullptr)
-    , m_mainToolBar(nullptr)
-    , m_formatToolBar(nullptr)
-    , m_newAction(nullptr)
-    , m_openAction(nullptr)
-    , m_saveAction(nullptr)
-    , m_saveAsAction(nullptr)
-    , m_printAction(nullptr)
-    , m_exitAction(nullptr)
-    , m_undoAction(nullptr)
-    , m_redoAction(nullptr)
-    , m_cutAction(nullptr)
-    , m_copyAction(nullptr)
-    , m_pasteAction(nullptr)
-    , m_findAction(nullptr)
-    , m_replaceAction(nullptr)
-    , m_selectAllAction(nullptr)
-    , m_wordWrapAction(nullptr)
-    , m_showToolBarAction(nullptr)
-    , m_showStatusBarAction(nullptr)
-    , m_aboutAction(nullptr)
-    , m_aboutQtAction(nullptr)
+    , previewVisible(false)
+    , m_findReplaceDialog(nullptr)
 {
-    setupUI();          // 创建用户界面
-    createFileTree();   // 创建文件树并添加示例文件
-    setWindowTitle(tr("Ink - 文本编辑器"));  // 设置窗口标题
-    resize(1200, 800);  // 设置窗口初始大小
+    // 设置窗口图标
+    setWindowIcon(QIcon(":/icons/icon"));
+    // 设置窗口属性
+    setWindowTitle("ink - 无标题");
+    resize(1200, 800);
+
+    // 初始化图标映射
+    initIconMap();
+
+    // 初始化UI
+    initUI();
+    initMenuBar();
+    initToolBar();
+    initStatusBar();
+    // 初始化文件列表
+    initFileList();
+    initConnections();
+
+    // 安装事件过滤器
+    installEventFilter(this);
+
+    // 加载设置
+    QSettings settings("ink", "Settings");
+    restoreGeometry(settings.value("geometry").toByteArray());
+    mainSplitter->restoreState(settings.value("splitterState").toByteArray());
+    previewVisible = settings.value("previewVisible", false).toBool();
+    togglePreviewAct->setChecked(previewVisible);
+
+    // 初始状态：没有打开的文件
+    updateWindowTitle();
+    updateStatusBar();
+    updateEditActions();
+
+    // 创建查找替换对话框（延迟创建）
+    m_findReplaceDialog = new FindReplaceDialog(this);
+
+    // 加载上次打开的文件列表
+    loadFileList();
 }
 
-/**
- * @brief 主窗口析构函数
- * 
- * 清理资源。目前没有需要特殊清理的资源，预留用于未来扩展。
- */
-MainWindow::~MainWindow() 
+MainWindow::~MainWindow()
 {
-    // 清理资源 - 目前没有需要特殊清理的资源
+    // 保存设置
+    QSettings settings("ink", "Settings");
+    settings.setValue("geometry", saveGeometry());
+    settings.setValue("splitterState", mainSplitter->saveState());
+    settings.setValue("previewVisible", previewVisible);
+
+    // 保存文件列表
+    saveFileList();
+
+    delete m_findReplaceDialog;
 }
 
-/**
- * @brief 初始化用户界面
- * 
- * 创建主窗口的核心界面组件：
- * 1. 创建菜单栏和工具栏
- * 2. 创建中心部件和主布局
- * 3. 水平分割器分隔左右面板
- * 4. 左侧面板：文件树控件，显示打开的文件
- * 5. 右侧面板：文本编辑控件，用于编辑文件内容
- * 6. 连接信号槽：文件树项点击事件
- */
-void MainWindow::setupUI()
+void MainWindow::initUI()
 {
-    // 创建菜单栏和工具栏
-    createMenuBar();
-    createToolBar();
-    
-    // 创建中心部件
-    QWidget *centralWidget = new QWidget(this);
-    setCentralWidget(centralWidget);
-    
-    // 创建主布局 - 水平布局
-    QHBoxLayout *mainLayout = new QHBoxLayout(centralWidget);
-    mainLayout->setContentsMargins(0, 0, 0, 0);  // 移除边距，使分割器占满整个窗口
-    
-    // 创建水平分割器，用于分隔左右面板
-    m_splitter = new QSplitter(Qt::Horizontal, centralWidget);
-    
-    // ==== 左侧面板：文件树 ====
-    QWidget *leftPanel = new QWidget(m_splitter);
+    // 创建主分割器（左右布局）
+    mainSplitter = new QSplitter(Qt::Horizontal, this);
+
+    // 左侧面板：文件列表
+    leftPanel = new QWidget(mainSplitter);
     QVBoxLayout *leftLayout = new QVBoxLayout(leftPanel);
-    leftLayout->setContentsMargins(5, 5, 5, 5);  // 设置边距
-    
-    // 创建文件树控件
-    m_fileTree = new QTreeWidget(leftPanel);
-    m_fileTree->setHeaderLabel(tr("打开的文件"));  // 设置标题
-    m_fileTree->setColumnCount(1);                 // 单列显示
-    m_fileTree->setAnimated(true);                 // 启用动画效果
-    m_fileTree->setIndentation(15);                // 设置缩进
-    m_fileTree->setSortingEnabled(false);          // 禁用排序
-    m_fileTree->setContextMenuPolicy(Qt::CustomContextMenu);  // 启用自定义上下文菜单
-    m_fileTree->header()->setStretchLastSection(true);        // 拉伸最后一列
-    m_fileTree->setMinimumWidth(250);              // 设置最小宽度
-    
-    leftLayout->addWidget(m_fileTree);
-    leftPanel->setLayout(leftLayout);
-    
-    // ==== 右侧面板：文本编辑器 ====
-    QWidget *rightPanel = new QWidget(m_splitter);
-    QVBoxLayout *rightLayout = new QVBoxLayout(rightPanel);
-    rightLayout->setContentsMargins(0, 0, 0, 0);  // 无边距
-    
-    // 创建文本编辑控件
-    m_textEdit = new QTextEdit(rightPanel);
-    m_textEdit->setAcceptRichText(false);          // 禁用富文本，只接受纯文本
-    m_textEdit->setLineWrapMode(QTextEdit::WidgetWidth);  // 按窗口宽度自动换行
-    
-    // 设置等宽字体，适合代码编辑
-    QFont fixedFont = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-    fixedFont.setPointSize(10);                     // 设置字体大小
-    m_textEdit->setFont(fixedFont);
-    
-    rightLayout->addWidget(m_textEdit);
-    rightPanel->setLayout(rightLayout);
-    
-    // 将左右面板添加到分割器
-    m_splitter->addWidget(leftPanel);
-    m_splitter->addWidget(rightPanel);
-    
-    // 设置分割比例：左侧1份，右侧3份
-    m_splitter->setStretchFactor(0, 1);
-    m_splitter->setStretchFactor(1, 3);
-    
-    // 将分割器添加到主布局
-    mainLayout->addWidget(m_splitter);
-    
-    // 连接信号槽：当文件树项被点击时，调用 onFileItemClicked 函数
-    connect(m_fileTree, &QTreeWidget::itemClicked, this, &MainWindow::onFileItemClicked);
-}
+    leftLayout->setContentsMargins(0, 0, 0, 0);
+    leftLayout->setSpacing(0);
 
-/**
- * @brief 创建菜单栏
- * 
- * 创建应用程序的菜单栏，包含以下菜单：
- * 1. 文件菜单：新建、打开、保存、另存为、打印、退出
- * 2. 编辑菜单：撤销、重做、剪切、复制、粘贴、查找、替换、全选
- * 3. 视图菜单：自动换行、显示工具栏、显示状态栏
- * 4. 帮助菜单：关于、关于Qt
- */
-void MainWindow::createMenuBar()
-{
-    // 获取主窗口的菜单栏
-    m_menuBar = menuBar();
-    
-    // ==== 文件菜单 ====
-    m_fileMenu = m_menuBar->addMenu(tr("文件(&F)"));
-    
-    m_newAction = new QAction(tr("新建(&N)"), this);
-    m_newAction->setShortcut(QKeySequence::New);
-    m_newAction->setStatusTip(tr("创建新文件"));
-    m_fileMenu->addAction(m_newAction);
-    
-    m_openAction = new QAction(tr("打开(&O)..."), this);
-    m_openAction->setShortcut(QKeySequence::Open);
-    m_openAction->setStatusTip(tr("打开文件"));
-    m_fileMenu->addAction(m_openAction);
-    
-    m_fileMenu->addSeparator();
-    
-    m_saveAction = new QAction(tr("保存(&S)"), this);
-    m_saveAction->setShortcut(QKeySequence::Save);
-    m_saveAction->setStatusTip(tr("保存文件"));
-    m_fileMenu->addAction(m_saveAction);
-    
-    m_saveAsAction = new QAction(tr("另存为(&A)..."), this);
-    m_saveAsAction->setShortcut(QKeySequence::SaveAs);
-    m_saveAsAction->setStatusTip(tr("另存为"));
-    m_fileMenu->addAction(m_saveAsAction);
-    
-    m_fileMenu->addSeparator();
-    
-    m_printAction = new QAction(tr("打印(&P)..."), this);
-    m_printAction->setShortcut(QKeySequence::Print);
-    m_printAction->setStatusTip(tr("打印文件"));
-    m_fileMenu->addAction(m_printAction);
-    
-    m_fileMenu->addSeparator();
-    
-    m_exitAction = new QAction(tr("退出(&X)"), this);
-    m_exitAction->setShortcut(QKeySequence::Quit);
-    m_exitAction->setStatusTip(tr("退出应用程序"));
-    m_fileMenu->addAction(m_exitAction);
-    
-    // ==== 编辑菜单 ====
-    m_editMenu = m_menuBar->addMenu(tr("编辑(&E)"));
-    
-    m_undoAction = new QAction(tr("撤销(&U)"), this);
-    m_undoAction->setShortcut(QKeySequence::Undo);
-    m_undoAction->setStatusTip(tr("撤销上一次操作"));
-    m_undoAction->setEnabled(false);
-    m_editMenu->addAction(m_undoAction);
-    
-    m_redoAction = new QAction(tr("重做(&R)"), this);
-    m_redoAction->setShortcut(QKeySequence::Redo);
-    m_redoAction->setStatusTip(tr("重做上一次撤销的操作"));
-    m_redoAction->setEnabled(false);
-    m_editMenu->addAction(m_redoAction);
-    
-    m_editMenu->addSeparator();
-    
-    m_cutAction = new QAction(tr("剪切(&T)"), this);
-    m_cutAction->setShortcut(QKeySequence::Cut);
-    m_cutAction->setStatusTip(tr("剪切选中的文本"));
-    m_cutAction->setEnabled(false);
-    m_editMenu->addAction(m_cutAction);
-    
-    m_copyAction = new QAction(tr("复制(&C)"), this);
-    m_copyAction->setShortcut(QKeySequence::Copy);
-    m_copyAction->setStatusTip(tr("复制选中的文本"));
-    m_copyAction->setEnabled(false);
-    m_editMenu->addAction(m_copyAction);
-    
-    m_pasteAction = new QAction(tr("粘贴(&P)"), this);
-    m_pasteAction->setShortcut(QKeySequence::Paste);
-    m_pasteAction->setStatusTip(tr("粘贴剪贴板中的文本"));
-    m_editMenu->addAction(m_pasteAction);
-    
-    m_editMenu->addSeparator();
-    
-    m_findAction = new QAction(tr("查找(&F)..."), this);
-    m_findAction->setShortcut(QKeySequence::Find);
-    m_findAction->setStatusTip(tr("查找文本"));
-    m_editMenu->addAction(m_findAction);
-    
-    m_replaceAction = new QAction(tr("替换(&R)..."), this);
-    m_replaceAction->setShortcut(QKeySequence::Replace);
-    m_replaceAction->setStatusTip(tr("替换文本"));
-    m_editMenu->addAction(m_replaceAction);
-    
-    m_editMenu->addSeparator();
-    
-    m_selectAllAction = new QAction(tr("全选(&A)"), this);
-    m_selectAllAction->setShortcut(QKeySequence::SelectAll);
-    m_selectAllAction->setStatusTip(tr("选择所有文本"));
-    m_editMenu->addAction(m_selectAllAction);
-    
-    // ==== 视图菜单 ====
-    m_viewMenu = m_menuBar->addMenu(tr("视图(&V)"));
-    
-    m_wordWrapAction = new QAction(tr("自动换行(&W)"), this);
-    m_wordWrapAction->setCheckable(true);
-    m_wordWrapAction->setChecked(true);
-    m_wordWrapAction->setStatusTip(tr("启用或禁用自动换行"));
-    m_viewMenu->addAction(m_wordWrapAction);
-    
-    m_viewMenu->addSeparator();
-    
-    m_showToolBarAction = new QAction(tr("工具栏(&T)"), this);
-    m_showToolBarAction->setCheckable(true);
-    m_showToolBarAction->setChecked(true);
-    m_showToolBarAction->setStatusTip(tr("显示或隐藏工具栏"));
-    m_viewMenu->addAction(m_showToolBarAction);
-    
-    m_showStatusBarAction = new QAction(tr("状态栏(&S)"), this);
-    m_showStatusBarAction->setCheckable(true);
-    m_showStatusBarAction->setChecked(true);
-    m_showStatusBarAction->setStatusTip(tr("显示或隐藏状态栏"));
-    m_viewMenu->addAction(m_showStatusBarAction);
-    
-    // ==== 帮助菜单 ====
-    m_helpMenu = m_menuBar->addMenu(tr("帮助(&H)"));
-    
-    m_aboutAction = new QAction(tr("关于(&A)..."), this);
-    m_aboutAction->setStatusTip(tr("显示关于对话框"));
-    m_helpMenu->addAction(m_aboutAction);
-    
-    m_aboutQtAction = new QAction(tr("关于Qt(&Q)..."), this);
-    m_aboutQtAction->setStatusTip(tr("显示关于Qt对话框"));
-    m_helpMenu->addAction(m_aboutQtAction);
-}
+    // 文件列表工具栏 - 高度与导航栏保持一致
+    QWidget *toolbarWidget = new QWidget(leftPanel);
+    toolbarWidget->setFixedHeight(25);  // 设置与右侧导航栏相同的高度
+    toolbarWidget->setStyleSheet("background-color: #f0f0f0; border-bottom: 1px solid #d0d0d0;");
 
-/**
- * @brief 创建工具栏
- * 
- * 创建应用程序的工具栏，包含常用功能的按钮：
- * 1. 主工具栏：新建、打开、保存、打印、剪切、复制、粘贴、查找
- * 2. 格式工具栏：自动换行、字体设置等（预留）
- */
-void MainWindow::createToolBar()
-{
-    // 创建主工具栏
-    m_mainToolBar = addToolBar(tr("主工具栏"));
-    m_mainToolBar->setMovable(true);
-    
-    // 添加工具栏按钮
-    m_mainToolBar->addAction(m_newAction);
-    m_mainToolBar->addAction(m_openAction);
-    m_mainToolBar->addAction(m_saveAction);
-    
-    m_mainToolBar->addSeparator();
-    
-    m_mainToolBar->addAction(m_printAction);
-    
-    m_mainToolBar->addSeparator();
-    
-    m_mainToolBar->addAction(m_cutAction);
-    m_mainToolBar->addAction(m_copyAction);
-    m_mainToolBar->addAction(m_pasteAction);
-    
-    m_mainToolBar->addSeparator();
-    
-    m_mainToolBar->addAction(m_findAction);
-    
-    // 创建格式工具栏（预留，暂时不添加具体内容）
-    m_formatToolBar = addToolBar(tr("格式"));
-    m_formatToolBar->setMovable(true);
-    m_formatToolBar->setVisible(false);  // 默认隐藏格式工具栏
-}
+    QHBoxLayout *toolbarLayout = new QHBoxLayout(toolbarWidget);
+    toolbarLayout->setContentsMargins(4, 0, 4, 0);  // 减少边距
+    toolbarLayout->setSpacing(2);  // 减小按钮间距
 
-/**
- * @brief 创建文件树并添加示例文件
- * 
- * 清空现有文件树，然后添加一些示例文件用于演示。
- * 这些示例文件包括不同类型的文件（C++、Python、Markdown等），
- * 分布在不同的文件夹中，以展示文件树的分层结构。
- */
-void MainWindow::createFileTree()
-{
-    m_fileTree->clear();  // 清空现有文件树
-    
-    // 模拟一些打开的文件用于演示
-    QStringList demoFiles;
-    demoFiles << "c:/projects/src/main.cpp"      // C++源文件
-              << "c:/projects/src/utils.cpp"     // C++源文件
-              << "c:/projects/include/utils.h"   // C++头文件
-              << "c:/docs/notes.txt"             // 文本文件
-              << "c:/docs/todo.md"               // Markdown文件
-              << "c:/temp/test.py"               // Python文件
-              << "c:/temp/backup.sh";            // Shell脚本
-    
-    // 遍历示例文件列表，逐个添加到文件树
-    foreach (const QString &filePath, demoFiles) {
-        addFileToTree(filePath);
+    // 创建左侧按钮容器（用于定位、展开、折叠）
+    QWidget *leftButtons = new QWidget(toolbarWidget);
+    leftButtons->setStyleSheet("background: transparent;");
+    QHBoxLayout *leftButtonLayout = new QHBoxLayout(leftButtons);
+    leftButtonLayout->setContentsMargins(0, 0, 0, 0);
+    leftButtonLayout->setSpacing(2);
+
+    // 创建右侧按钮容器（用于新建、打开）
+    QWidget *rightButtons = new QWidget(toolbarWidget);
+    rightButtons->setStyleSheet("background: transparent;");
+    QHBoxLayout *rightButtonLayout = new QHBoxLayout(rightButtons);
+    rightButtonLayout->setContentsMargins(0, 0, 0, 0);
+    rightButtonLayout->setSpacing(2);
+
+    // 创建工具栏按钮 - 使用图标
+    locateBtn = new QPushButton(toolbarWidget);
+    locateBtn->setIcon(QIcon(":/icons/location"));  // 从资源文件加载图标
+    locateBtn->setFixedSize(24, 20);  // 固定大小
+    locateBtn->setStyleSheet(
+        "QPushButton {"
+        "    background-color: transparent;"  // 透明背景
+        "    border: none;"  // 无边框
+        "    border-radius: 2px;"
+        "    padding: 1px;"
+        "}"
+        "QPushButton:hover {"
+        "    background-color: #d0d0d0;"  // 悬停时显示背景
+        "}"
+        "QPushButton:pressed {"
+        "    background-color: #c0c0c0;"  // 按下时显示背景
+        "}"
+        );
+
+    expandBtn = new QPushButton(toolbarWidget);
+    expandBtn->setIcon(QIcon(":/icons/expand"));
+    expandBtn->setFixedSize(24, 20);
+    expandBtn->setStyleSheet(
+        "QPushButton {"
+        "    background-color: transparent;"
+        "    border: none;"
+        "    border-radius: 2px;"
+        "    padding: 1px;"
+        "}"
+        "QPushButton:hover {"
+        "    background-color: #d0d0d0;"
+        "}"
+        "QPushButton:pressed {"
+        "    background-color: #c0c0c0;"
+        "}"
+        );
+
+    foldBtn = new QPushButton(toolbarWidget);
+    foldBtn->setIcon(QIcon(":/icons/fold"));
+    foldBtn->setFixedSize(24, 20);
+    foldBtn->setStyleSheet(
+        "QPushButton {"
+        "    background-color: transparent;"
+        "    border: none;"
+        "    border-radius: 2px;"
+        "    padding: 1px;"
+        "}"
+        "QPushButton:hover {"
+        "    background-color: #d0d0d0;"
+        "}"
+        "QPushButton:pressed {"
+        "    background-color: #c0c0c0;"
+        "}"
+        );
+
+
+    // 左侧按钮：定位、展开、折叠（按顺序：定位、折叠、展开）
+    leftButtonLayout->addWidget(locateBtn);
+    leftButtonLayout->addWidget(foldBtn);
+    leftButtonLayout->addWidget(expandBtn);
+
+    // 将左右按钮容器添加到主工具栏布局
+    toolbarLayout->addWidget(rightButtons);  // 左侧按钮容器（靠左）
+    toolbarLayout->addStretch();           // 弹性空间，将右侧按钮推到最右边
+    toolbarLayout->addWidget(leftButtons); // 右侧按钮容器（靠右）
+
+    // 文件树（使用QTreeWidget）
+    fileTree = new QTreeWidget(leftPanel);
+    fileTree->setHeaderHidden(true);  // 隐藏标题栏，显示空白列表
+    fileTree->setAlternatingRowColors(true);
+    fileTree->setAnimated(true);
+    fileTree->setIndentation(15);
+
+    // 添加到左侧布局
+    leftLayout->addWidget(toolbarWidget);
+    leftLayout->addWidget(fileTree);
+
+    leftPanel->setMinimumWidth(200);
+    leftPanel->setMaximumWidth(350);
+
+    // 中央区域：编辑器标签页
+    QWidget *centerPanel = new QWidget(mainSplitter);
+    QVBoxLayout *centerLayout = new QVBoxLayout(centerPanel);
+    centerLayout->setContentsMargins(0, 0, 0, 0);
+
+    tabWidget = new QTabWidget(centerPanel);
+    tabWidget->setTabsClosable(true);
+    tabWidget->setMovable(true);
+    tabWidget->setDocumentMode(true);
+    // 设置标签页的高度，左侧工具栏与其保持一致
+    tabWidget->setStyleSheet("QTabBar::tab { height: 25px; }");
+
+    centerLayout->addWidget(tabWidget);
+
+    // 预览面板（初始隐藏）
+    previewPanel = new QTextEdit(mainSplitter);
+    previewPanel->setReadOnly(true);
+    previewPanel->setVisible(previewVisible);
+    previewPanel->setMinimumWidth(300);
+
+    // 添加到分割器
+    mainSplitter->addWidget(leftPanel);
+    mainSplitter->addWidget(centerPanel);
+    mainSplitter->addWidget(previewPanel);
+
+    // 设置分割器比例
+    QList<int> sizes;
+    if (previewVisible) {
+        sizes << 200 << 500 << 300;
+    } else {
+        sizes << 200 << 600 << 0;
+        previewPanel->setVisible(false);
     }
-    
-    // 展开所有项，方便用户查看
-    m_fileTree->expandAll();
+    mainSplitter->setSizes(sizes);
+
+    setCentralWidget(mainSplitter);
 }
 
-/**
- * @brief 查找或创建文件夹项
- * @param folderPath 文件夹路径
- * @return 文件夹树项指针
- * 
- * 在文件树中查找指定文件夹路径的项。如果找到，返回该项；
- * 如果未找到，创建一个新的文件夹项并添加到文件树中。
- * 使用 Qt::UserRole 存储文件夹路径作为标识。
- */
-QTreeWidgetItem* MainWindow::findOrCreateFolderItem(const QString &folderPath)
+void MainWindow::initMenuBar()
 {
-    // 检查是否已存在该文件夹项
-    for (int i = 0; i < m_fileTree->topLevelItemCount(); ++i) {
-        QTreeWidgetItem *topItem = m_fileTree->topLevelItem(i);
-        // 通过 UserRole 数据比较文件夹路径
-        if (topItem->data(0, Qt::UserRole).toString() == folderPath) {
-            return topItem;  // 找到现有项，直接返回
+    // 文件菜单
+    fileMenu = menuBar()->addMenu("文件(&F)");
+
+    newAct = new QAction("新建(&N)", this);
+    newAct->setShortcut(QKeySequence::New);
+    fileMenu->addAction(newAct);
+
+    openAct = new QAction("打开(&O)", this);
+    openAct->setShortcut(QKeySequence::Open);
+    fileMenu->addAction(openAct);
+
+    fileMenu->addSeparator();
+
+    saveAct = new QAction("保存(&S)", this);
+    saveAct->setShortcut(QKeySequence::Save);
+    saveAct->setEnabled(false);
+    fileMenu->addAction(saveAct);
+
+    saveAsAct = new QAction("另存为(&A)", this);
+    saveAsAct->setShortcut(QKeySequence::SaveAs);
+    saveAsAct->setEnabled(false);
+    fileMenu->addAction(saveAsAct);
+
+    fileMenu->addSeparator();
+
+    closeAct = new QAction("关闭(&C)", this);
+    closeAct->setShortcut(QKeySequence::Close);
+    closeAct->setEnabled(false);
+    fileMenu->addAction(closeAct);
+
+    exitAct = new QAction("退出(&X)", this);
+    exitAct->setShortcut(QKeySequence::Quit);
+    fileMenu->addAction(exitAct);
+
+    // 编辑菜单
+    editMenu = menuBar()->addMenu("编辑(&E)");
+
+    undoAct = new QAction("撤销(&U)", this);
+    undoAct->setShortcut(QKeySequence::Undo);
+    undoAct->setEnabled(false);
+    editMenu->addAction(undoAct);
+
+    redoAct = new QAction("重做(&R)", this);
+    redoAct->setShortcut(QKeySequence::Redo);
+    redoAct->setEnabled(false);
+    editMenu->addAction(redoAct);
+
+    editMenu->addSeparator();
+
+    QAction *findAct = new QAction("查找(&F)", this);
+    findAct->setShortcut(QKeySequence::Find);
+    connect(findAct, &QAction::triggered, this, &MainWindow::showFindDialog);
+    editMenu->addAction(findAct);
+
+    QAction *replaceAct = new QAction("替换(&R)", this);
+    replaceAct->setShortcut(QKeySequence::Replace);
+    connect(replaceAct, &QAction::triggered, this, &MainWindow::showReplaceDialog);
+    editMenu->addAction(replaceAct);
+
+    editMenu->addSeparator();
+
+    cutAct = new QAction("剪切(&T)", this);
+    cutAct->setShortcut(QKeySequence::Cut);
+    cutAct->setEnabled(false);
+    editMenu->addAction(cutAct);
+
+    copyAct = new QAction("复制(&C)", this);
+    copyAct->setShortcut(QKeySequence::Copy);
+    copyAct->setEnabled(false);
+    editMenu->addAction(copyAct);
+
+    pasteAct = new QAction("粘贴(&P)", this);
+    pasteAct->setShortcut(QKeySequence::Paste);
+    editMenu->addAction(pasteAct);
+
+    // 视图菜单
+    viewMenu = menuBar()->addMenu("视图(&V)");
+
+    toggleFileListAct = new QAction("文件列表", this);
+    toggleFileListAct->setShortcut(QKeySequence("Ctrl+Shift+F"));
+    toggleFileListAct->setCheckable(true);
+    toggleFileListAct->setChecked(true);
+    viewMenu->addAction(toggleFileListAct);
+
+    togglePreviewAct = new QAction("预览面板", this);
+    togglePreviewAct->setShortcut(QKeySequence("Ctrl+Shift+P"));
+    togglePreviewAct->setCheckable(true);
+    togglePreviewAct->setChecked(previewVisible);
+    viewMenu->addAction(togglePreviewAct);
+
+    // 帮助菜单
+    helpMenu = menuBar()->addMenu("帮助(&H)");
+
+    aboutAct = new QAction("关于(&A)", this);
+    helpMenu->addAction(aboutAct);
+}
+
+void MainWindow::initToolBar()
+{
+    QToolBar *toolBar = addToolBar("主工具栏");
+    toolBar->setMovable(false);
+    toolBar->setIconSize(QSize(20, 20));  // 设置图标大小
+
+    // 设置工具栏样式
+    toolBar->setStyleSheet(
+        "QToolBar {"
+        "    spacing: 2px;"
+        "    background-color: #f0f0f0;"
+        "    border: none;"
+        "    border-bottom: 1px solid #d0d0d0;"
+        "}"
+        "QToolBar QToolButton {"
+        "    padding: 2px;"
+        "    border-radius: 2px;"
+        "    margin: 1px;"
+        "}"
+        "QToolBar QToolButton:hover {"
+        "    background-color: #d0d0d0;"
+        "}"
+        "QToolBar QToolButton:pressed {"
+        "    background-color: #c0c0c0;"
+        "}"
+        );
+
+    // 为所有动作设置图标
+    newAct->setIcon(QIcon(":/icons/addfile"));
+    openAct->setIcon(QIcon(":/icons/openfile"));
+
+    // 使用图标模式添加动作
+    toolBar->addAction(newAct);
+    toolBar->addAction(openAct);
+    toolBar->addSeparator();
+    toolBar->addAction(saveAct);
+    toolBar->addSeparator();
+    toolBar->addAction(undoAct);
+    toolBar->addAction(redoAct);
+    toolBar->addSeparator();
+    toolBar->addAction(cutAct);
+    toolBar->addAction(copyAct);
+    toolBar->addAction(pasteAct);
+
+    toolBar->addSeparator();
+
+    QAction *findAct = new QAction(QIcon(":/icons/search"), "查找", this);
+    connect(findAct, &QAction::triggered, this, &MainWindow::showFindDialog);
+    toolBar->addAction(findAct);
+
+    QAction *replaceAct = new QAction(QIcon(":/icons/replace"), "替换", this);
+    connect(replaceAct, &QAction::triggered, this, &MainWindow::showReplaceDialog);
+    toolBar->addAction(replaceAct);
+}
+
+void MainWindow::initStatusBar()
+{
+    statusPosition = new QLabel("行: 1, 列: 1", this);
+    statusFileInfo = new QLabel("就绪", this);
+
+    statusBar()->addWidget(statusPosition, 1);
+    statusBar()->addWidget(statusFileInfo, 2);
+}
+
+void MainWindow::initFileList()
+{
+    // 初始为空，不需要添加任何项目
+    fileTree->clear();
+    filePathMap.clear();
+
+    // 设置文件树样式 - 移除标题后的样式
+    fileTree->setStyleSheet(
+        "QTreeWidget {"
+        "    border: none;"
+        "    background-color: #ffffff;"
+        "    outline: 0;"
+        "    font-size: 11pt;"
+        "}"
+        "QTreeWidget::item {"
+        "    padding: 3px 2px;"  // 更紧凑的间距
+        "    border-bottom: 1px solid transparent;"
+        "    min-height: 20px;"    // 设置最小高度
+        "    max-height: 20px;"    // 设置最大高度
+        "}"
+        "QTreeWidget::item:selected {"
+        "    background-color: #D1D1D1;"
+        "    color: #000000;"
+        "    border: none;"
+        "}"
+        "QTreeWidget::item:hover:!selected {"
+        "    background-color: #EAEAEA;"
+        "    color: #000000;"
+        "}"
+        "QTreeWidget::item:focus {"
+        "    outline: none;"
+        "}"
+        // 滚动条样式
+        "QScrollBar:vertical {"
+        "    border: none;"
+        "    background: #f0f0f0;"
+        "    width: 10px;"
+        "    margin: 0px;"
+        "}"
+        "QScrollBar::handle:vertical {"
+        "    background: #c0c0c0;"
+        "    min-height: 20px;"
+        "    border-radius: 5px;"
+        "}"
+        "QScrollBar::handle:vertical:hover {"
+        "    background: #a0a0a0;"
+        "}"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {"
+        "    height: 0px;"
+        "}"
+        );
+}
+
+void MainWindow::initConnections()
+{
+    // 文件操作
+    connect(newAct, &QAction::triggered, this, &MainWindow::newFile);
+
+    // 使用lambda解决openFile名称冲突
+    connect(openAct, &QAction::triggered, this, [this]() {
+        QString filePath = QFileDialog::getOpenFileName(this, "打开文件",
+                                                        QDir::homePath(),
+                                                        "所有文件 (*.*);;"
+                                                        "文本文件 (*.txt);;"
+                                                        "C++文件 (*.cpp *.h *.hpp);;"
+                                                        "Markdown文件 (*.md);;"
+                                                        "Python文件 (*.py);;"
+                                                        "JavaScript文件 (*.js)");
+        if (!filePath.isEmpty()) {
+            openFileFromPath(filePath);
+        }
+    });
+
+    connect(saveAct, &QAction::triggered, this, &MainWindow::saveFile);
+    connect(saveAsAct, &QAction::triggered, this, &MainWindow::saveFileAs);
+    connect(closeAct, &QAction::triggered, this, [this]() { closeTab(); });
+    connect(exitAct, &QAction::triggered, qApp, &QApplication::quit);
+
+    // 编辑操作
+    connect(undoAct, &QAction::triggered, this, &MainWindow::undo);
+    connect(redoAct, &QAction::triggered, this, &MainWindow::redo);
+    connect(cutAct, &QAction::triggered, this, &MainWindow::cut);
+    connect(copyAct, &QAction::triggered, this, &MainWindow::copy);
+    connect(pasteAct, &QAction::triggered, this, &MainWindow::paste);
+
+    // 视图操作
+    connect(toggleFileListAct, &QAction::triggered, this, [this](bool checked) {
+        toggleFileList(checked);
+    });
+    connect(togglePreviewAct, &QAction::triggered, this, [this](bool checked) {
+        togglePreview(checked);
+    });
+
+    // 文件列表工具栏按钮
+    connect(locateBtn, &QPushButton::clicked, this, &MainWindow::locateCurrentFile);
+    connect(expandBtn, &QPushButton::clicked, this, &MainWindow::expandAllFiles);
+    connect(foldBtn, &QPushButton::clicked, this, &MainWindow::collapseAllFiles);
+
+    // 帮助
+    connect(aboutAct, &QAction::triggered, this, &MainWindow::showAboutDialog);
+
+    // 文件树 - 使用旧的SIGNAL/SLOT语法避免编译错误
+    connect(fileTree, SIGNAL(itemClicked(QTreeWidgetItem*, int)),
+            this, SLOT(onFileItemClicked(QTreeWidgetItem*, int)));
+
+    // 标签页
+    connect(tabWidget, &QTabWidget::tabCloseRequested, this, &MainWindow::closeTab);
+    connect(tabWidget, &QTabWidget::currentChanged, this, &MainWindow::currentTabChanged);
+
+    QShortcut *findNextShortcut = new QShortcut(QKeySequence("F3"), this);
+    connect(findNextShortcut, &QShortcut::activated, this, [this]() {
+        if (m_findReplaceDialog && m_findReplaceDialog->isVisible()) {
+            m_findReplaceDialog->findNextMatch();
+        } else {
+            showFindDialog();
+        }
+    });
+    // Shift+F3 查找上一个
+    QShortcut *findPrevShortcut = new QShortcut(QKeySequence("Shift+F3"), this);
+    connect(findPrevShortcut, &QShortcut::activated, this, [this]() {
+        if (m_findReplaceDialog && m_findReplaceDialog->isVisible()) {
+            m_findReplaceDialog->findPrevMatch();
+        }
+    });
+}
+
+// 查找或创建父目录项
+QTreeWidgetItem* MainWindow::findOrCreateParentItem(const QString &dirPath)
+{
+    QDir dir(dirPath);
+    QString relativePath = dir.absolutePath();
+
+    QTreeWidgetItem *currentParent = fileTree->invisibleRootItem();
+
+    QStringList pathParts;
+#if defined(Q_OS_WIN)
+    // Windows路径处理
+    if (relativePath.contains(':')) {
+        // 包含盘符，作为第一级
+        QString drive = relativePath.left(relativePath.indexOf(':') + 2);
+        pathParts.append(drive);
+        relativePath = relativePath.mid(drive.length());
+    }
+    QStringList parts = relativePath.split('\\', Qt::SkipEmptyParts);
+#else
+    // Unix-like路径
+    if (relativePath.startsWith('/')) {
+        pathParts.append("/");
+        relativePath = relativePath.mid(1);
+    }
+    QStringList parts = relativePath.split('/', Qt::SkipEmptyParts);
+#endif
+
+    pathParts.append(parts);
+
+    // 逐级查找或创建
+    for (const QString &part : pathParts) {
+        if (part.isEmpty()) continue;
+
+        bool found = false;
+        for (int i = 0; i < currentParent->childCount(); ++i) {
+            if (currentParent->child(i)->text(0) == part) {
+                currentParent = currentParent->child(i);
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            QTreeWidgetItem *newItem = new QTreeWidgetItem(currentParent);
+            newItem->setText(0, part);
+            newItem->setData(0, Qt::UserRole, QString()); // 目录项不存储完整路径
+
+            // 为目录项设置文件夹图标
+            newItem->setIcon(0, QIcon(":/icons/folder"));
+
+            currentParent = newItem;
         }
     }
-    
-    // 创建新的文件夹项
-    QTreeWidgetItem *folderItem = new QTreeWidgetItem(m_fileTree);
-    folderItem->setText(0, folderPath);  // 显示文件夹路径
-    folderItem->setData(0, Qt::UserRole, folderPath);  // 存储文件夹路径作为标识
-    folderItem->setIcon(0, QApplication::style()->standardIcon(QStyle::SP_DirIcon));  // 设置文件夹图标
-    
-    return folderItem;  // 返回新创建的文件夹项
+
+    return currentParent;
 }
 
-/**
- * @brief 添加文件到文件树
- * @param filePath 文件路径
- * 
- * 根据文件路径将文件添加到文件树中：
- * 1. 提取文件所在文件夹路径
- * 2. 查找或创建对应的文件夹项
- * 3. 在文件夹项下创建文件项
- * 4. 将文件路径添加到打开文件映射中
- * 
- * 文件树结构：文件夹（顶级）-> 文件（子级）
- */
-void MainWindow::addFileToTree(const QString &filePath)
+// 定位当前文件
+void MainWindow::locateCurrentFile()
+{
+    QString filePath = getCurrentFilePath();
+    if (!filePath.isEmpty()) {
+        selectFileInTree(filePath);
+    }
+}
+
+// 展开所有文件
+void MainWindow::expandAllFiles()
+{
+    fileTree->expandAll();
+}
+
+// 折叠所有文件
+void MainWindow::collapseAllFiles()
+{
+    fileTree->collapseAll();
+}
+
+// 在树中选择文件
+void MainWindow::selectFileInTree(const QString &filePath)
 {
     QFileInfo fileInfo(filePath);
-    QString folderPath = fileInfo.absolutePath();  // 提取文件夹路径
-    
-    // 找到或创建文件夹项
-    QTreeWidgetItem *folderItem = findOrCreateFolderItem(folderPath);
-    
-    // 在文件夹项下创建文件项
-    QTreeWidgetItem *fileItem = new QTreeWidgetItem(folderItem);
-    fileItem->setText(0, fileInfo.fileName());  // 显示文件名
-    fileItem->setData(0, Qt::UserRole, filePath);  // 存储完整文件路径作为标识
-    fileItem->setIcon(0, QApplication::style()->standardIcon(QStyle::SP_FileIcon));  // 设置文件图标
-    
-    // 添加到打开文件映射中，初始内容为空
-    m_openFiles[filePath] = "";
+    QString displayName = fileInfo.fileName();
+
+    // 使用完整路径查找文件项
+    QTreeWidgetItem *fileItem = findFileItemInTree(fileTree->invisibleRootItem(), filePath, displayName);
+    if (fileItem) {
+        fileTree->setCurrentItem(fileItem);
+        fileTree->scrollToItem(fileItem);
+
+        // 展开所有父级目录
+        QTreeWidgetItem *parent = fileItem->parent();
+        while (parent) {
+            parent->setExpanded(true);
+            parent = parent->parent();
+        }
+    } else {
+        // 如果找不到，可能是因为文件还未添加到树中
+        qDebug() << "File not found in tree:" << filePath;
+    }
 }
 
-/**
- * @brief 文件树项点击槽函数
- * @param item 被点击的树项
- * @param column 点击的列（未使用）
- * 
- * 当用户在文件树中点击一个项目时触发：
- * 1. 检查点击的是文件项还是文件夹项（文件夹项不处理）
- * 2. 从项目数据中获取文件路径
- * 3. 如果文件内容尚未加载，生成模拟内容
- * 4. 将文件内容显示在文本编辑区域
- * 
- * 模拟内容根据文件类型生成不同的示例代码：
- * - C++文件：生成简单的 Hello World 程序
- * - Python文件：生成 Python 脚本
- * - Markdown文件：生成 Markdown 文档模板
- * - 其他文件：生成通用文本内容
- */
+// 递归查找文件项
+QTreeWidgetItem* MainWindow::findFileItemInTree(QTreeWidgetItem *parent, const QString &filePath, const QString &displayName)
+{
+    if (!parent) return nullptr;
+
+    // 只检查完整路径是否匹配
+    QString storedPath = parent->data(0, Qt::UserRole).toString();
+    if (!storedPath.isEmpty() && storedPath == filePath) {
+        return parent;
+    }
+
+    // 递归查找子项
+    for (int i = 0; i < parent->childCount(); ++i) {
+        QTreeWidgetItem *child = parent->child(i);
+        QTreeWidgetItem *result = findFileItemInTree(child, filePath, displayName);
+        if (result) {
+            return result;
+        }
+    }
+
+    return nullptr;
+}
+
+// 递归清理空目录
+void MainWindow::cleanupEmptyDirectories(QTreeWidgetItem *item)
+{
+    if (!item) return;
+
+    // 如果是文件项，不处理
+    QString storedPath = item->data(0, Qt::UserRole).toString();
+    if (!storedPath.isEmpty()) {
+        return; // 文件项
+    }
+
+    // 如果没有子项且不是根节点，移除该项
+    if (item->childCount() == 0 && item->parent()) {
+        QTreeWidgetItem *parent = item->parent();
+        parent->removeChild(item);
+        delete item;
+
+        // 继续清理父级目录
+        cleanupEmptyDirectories(parent);
+    }
+}
+
+// 初始化图标映射
+void MainWindow::initIconMap()
+{
+    // 清空现有映射
+    iconMap.clear();
+
+    // 文本文件
+    iconMap["txt"] = ":/icons/txt";
+    iconMap["text"] = ":/icons/text";
+    iconMap["md"] = ":/icons/markdown";
+    iconMap["markdown"] = ":/icons/markdown";
+
+    // C/C++ 文件
+    iconMap["c"] = ":/icons/cpp";
+    iconMap["cpp"] = ":/icons/cpp";
+    iconMap["cc"] = ":/icons/cpp";
+    iconMap["cxx"] = ":/icons/cpp";
+    iconMap["h"] = ":/icons/h";
+    iconMap["hh"] = ":/icons/h";
+    iconMap["hpp"] = ":/icons/h";
+    iconMap["hxx"] = ":/icons/h";
+
+    // 脚本语言
+    iconMap["py"] = ":/icons/python";
+    iconMap["pyw"] = ":/icons/python";
+    iconMap["js"] = ":/icons/js";
+    iconMap["jsx"] = ":/icons/js";
+    iconMap["ts"] = ":/icons/js";
+    iconMap["tsx"] = ":/icons/js";
+    iconMap["java"] = ":/icons/java";
+    iconMap["class"] = ":/icons/java";
+
+    // Web 文件
+    iconMap["html"] = ":/icons/html";
+    iconMap["htm"] = ":/icons/html";
+    iconMap["xhtml"] = ":/icons/html";
+    iconMap["css"] = ":/icons/css";
+    iconMap["scss"] = ":/icons/css";
+    iconMap["sass"] = ":/icons/css";
+    iconMap["less"] = ":/icons/css";
+
+    // 数据文件
+    iconMap["xml"] = ":/icons/xml";
+    iconMap["json"] = ":/icons/json";
+    iconMap["yml"] = ":/icons/yaml";
+    iconMap["yaml"] = ":/icons/yaml";
+    iconMap["toml"] = ":/icons/toml";
+    iconMap["ini"] = ":/icons/ini";
+    iconMap["conf"] = ":/icons/ini";
+    iconMap["cfg"] = ":/icons/ini";
+
+    // 脚本文件
+    iconMap["sh"] = ":/icons/sh";
+    iconMap["bash"] = ":/icons/sh";
+    iconMap["zsh"] = ":/icons/sh";
+    iconMap["bat"] = ":/icons/bat";
+    iconMap["cmd"] = ":/icons/bat";
+    iconMap["ps1"] = ":/icons/ps1";
+
+    // 其他编程语言（根据需要添加）
+    iconMap["go"] = ":/icons/go";
+    iconMap["rs"] = ":/icons/rust";
+    iconMap["php"] = ":/icons/php";
+    iconMap["rb"] = ":/icons/ruby";
+    iconMap["swift"] = ":/icons/swift";
+    iconMap["kt"] = ":/icons/kotlin";
+}
+
+// 从树中移除文件
+void MainWindow::removeFileFromTree(const QString &filePath)
+{
+    QFileInfo fileInfo(filePath);
+    QString displayName = fileInfo.fileName();  // 注意：这里应该使用完整文件名，不是去掉后缀的
+
+    // 使用完整路径查找并移除文件项
+    QTreeWidgetItem *fileItem = findFileItemInTree(fileTree->invisibleRootItem(), filePath, displayName);
+    if (fileItem) {
+        QTreeWidgetItem *parent = fileItem->parent();
+        if (parent) {
+            parent->removeChild(fileItem);
+            delete fileItem;
+
+            // 从映射中移除
+            filePathMap.remove(filePath);
+
+            // 递归清理空目录
+            cleanupEmptyDirectories(parent);
+        }
+    }
+}
+
+QPlainTextEdit* MainWindow::createEditor()
+{
+    LineNumberEditor *editor = new LineNumberEditor();
+
+    // 连接文本改变信号
+    connect(editor, &QPlainTextEdit::textChanged, this, &MainWindow::onTextChanged);
+    connect(editor, &QPlainTextEdit::cursorPositionChanged, this, &MainWindow::updateStatusBar);
+    connect(editor, &QPlainTextEdit::undoAvailable, undoAct, &QAction::setEnabled);
+    connect(editor, &QPlainTextEdit::redoAvailable, redoAct, &QAction::setEnabled);
+    connect(editor, &QPlainTextEdit::copyAvailable, cutAct, &QAction::setEnabled);
+    connect(editor, &QPlainTextEdit::copyAvailable, copyAct, &QAction::setEnabled);
+
+    // 为编辑器安装事件过滤器
+    editor->installEventFilter(this);
+
+
+    return editor;
+}
+
+// 工具函数：移除文件后缀
+QString MainWindow::removeFileExtension(const QString &fileName)
+{
+    int dotIndex = fileName.lastIndexOf('.');
+    if (dotIndex != -1) {
+        return fileName.left(dotIndex);
+    }
+    return fileName;
+}
+
+// 添加文件到左侧树形列表
+void MainWindow::addFileToList(const QString &filePath)
+{
+    QFileInfo fileInfo(filePath);
+    QString displayName = fileInfo.fileName();  // 保持显示名为文件名
+    QString dirPath = fileInfo.absolutePath();
+
+    // 获取父目录项
+    QTreeWidgetItem *parentItem = findOrCreateParentItem(dirPath);
+
+    // 检查文件是否已经存在 - 使用完整路径检查
+    for (int i = 0; i < parentItem->childCount(); ++i) {
+        QTreeWidgetItem *child = parentItem->child(i);
+        QString storedPath = child->data(0, Qt::UserRole).toString();
+        if (storedPath == filePath) {
+            return;  // 已存在，不重复添加
+        }
+    }
+
+    // 创建文件项
+    QTreeWidgetItem *fileItem = new QTreeWidgetItem(parentItem);
+    fileItem->setText(0, displayName);
+    fileItem->setData(0, Qt::UserRole, filePath);  // 存储完整路径
+
+    // 根据文件类型设置图标（保持原有代码）
+    if (fileInfo.isDir()) {
+        fileItem->setIcon(0, QIcon(":/icons/folder"));
+    } else {
+        QString suffix = fileInfo.suffix().toLower();
+        QString iconPath;
+        if (iconMap.contains(suffix)) {
+            iconPath = iconMap[suffix];
+        } else {
+            iconPath = ":/icons/file";
+        }
+        fileItem->setIcon(0, QIcon(iconPath));
+    }
+
+    // 保存映射关系 - 使用完整路径作为键，避免文件名冲突
+    filePathMap[filePath] = displayName;  // 修改映射关系
+
+    // 展开父目录
+    parentItem->setExpanded(true);
+}
+
+// 点击左侧文件树项
 void MainWindow::onFileItemClicked(QTreeWidgetItem *item, int column)
 {
-    Q_UNUSED(column);  // 列参数未使用
-    
-    if (!item) return;  // 空指针检查
-    
-    // 从树项数据中获取文件路径
+    Q_UNUSED(column);
+
+    if (!item) return;
+
     QString filePath = item->data(0, Qt::UserRole).toString();
-    QFileInfo fileInfo(filePath);
-    
-    // 如果是文件夹项，不处理（文件夹项没有对应的文件）
-    if (fileInfo.isDir() || !fileInfo.isFile()) {
+    if (filePath.isEmpty()) {
+        // 目录项，展开/折叠即可
+        item->setExpanded(!item->isExpanded());
         return;
     }
-    
-    // 模拟加载文件内容
-    QString content;
-    if (m_openFiles.contains(filePath)) {
-        content = m_openFiles[filePath];  // 获取已缓存的内容
-        
-        // 如果内容为空，生成模拟内容
-        if (content.isEmpty()) {
-            // 生成文件头信息
-            content = QString("// 文件: %1\n// 路径: %2\n// 最后修改: %3\n\n")
-                .arg(fileInfo.fileName())
-                .arg(fileInfo.absoluteFilePath())
-                .arg(fileInfo.lastModified().toString("yyyy-MM-dd hh:mm:ss"));
-            
-            // 根据文件类型添加不同的示例内容
-            if (fileInfo.suffix() == "cpp" || fileInfo.suffix() == "h") {
-                // C++文件：简单的 Hello World 程序
-                content += "#include <iostream>\n\nint main() {\n    std::cout << \"Hello, World!\" << std::endl;\n    return 0;\n}\n";
-            } else if (fileInfo.suffix() == "py") {
-                // Python文件：Python 脚本
-                content += "#!/usr/bin/env python3\n\nprint(\"Hello, Python!\")\n";
-            } else if (fileInfo.suffix() == "md") {
-                // Markdown文件：文档模板
-                content += "# " + fileInfo.fileName() + "\n\n这是一个 Markdown 文件。\n\n## 项目说明\n\n- 项目功能\n- 使用方法\n";
-            } else {
-                // 其他文件：通用文本内容
-                content += "这是 " + fileInfo.fileName() + " 文件的内容。\n你可以在这里编辑文本。\n";
-            }
-            
-            // 缓存生成的内容，避免重复生成
-            m_openFiles[filePath] = content;
+
+    // 检查文件是否存在
+    if (!QFile::exists(filePath)) {
+        QMessageBox::warning(this, "文件不存在", "文件已不存在或已被移动: " + filePath);
+        removeFileFromTree(filePath);
+        return;
+    }
+
+    // 检查是否已经在标签页中打开 - 使用完整路径比较
+    for (int i = 0; i < tabWidget->count(); ++i) {
+        QPlainTextEdit *editor = qobject_cast<QPlainTextEdit*>(tabWidget->widget(i));
+        if (editor && editor->property("filePath").toString() == filePath) {
+            tabWidget->setCurrentIndex(i);
+            return;
         }
     }
-    
-    // 更新文本编辑区域：显示文件内容
-    m_textEdit->setPlainText(content);
-    m_textEdit->setWindowTitle(fileInfo.fileName());  // 更新窗口标题显示文件名
+
+    // 打开文件
+    openFileFromPath(filePath);
 }
 
-/**
- * @brief 更新文件树槽函数
- * 
- * 这个函数目前是一个占位符，用于未来扩展。
- * 可以在这里实现更新文件树的逻辑，例如：
- * 1. 重新扫描已打开的文件
- * 2. 响应外部文件变化（如文件被删除、重命名等）
- * 3. 刷新文件树显示
- * 4. 更新文件状态（如只读、修改状态等）
- * 
- * 当前实现为空，需要根据具体需求添加功能。
- */
-void MainWindow::updateFileTree()
+// 打开文件（重载函数）
+void MainWindow::openFileFromPath(const QString &filePath)
 {
-    // 可以在这里实现更新文件树的逻辑
-    // 例如，重新扫描打开的文件或响应外部变化
-    // 当前为占位实现，需要时添加具体功能
+    // 检查是否已经打开
+    for (int i = 0; i < tabWidget->count(); ++i) {
+        QPlainTextEdit *editor = qobject_cast<QPlainTextEdit*>(tabWidget->widget(i));
+        if (editor && editor->property("filePath").toString() == filePath) {
+            tabWidget->setCurrentIndex(i);
+            return;
+        }
+    }
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, "错误", "无法打开文件: " + filePath);
+        return;
+    }
+
+    QTextStream in(&file);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    in.setCodec("UTF-8");
+#else
+    in.setEncoding(QStringConverter::Utf8);
+#endif
+    QString content = in.readAll();
+    file.close();
+
+    QPlainTextEdit *editor = createEditor();
+    editor->setPlainText(content);
+    editor->document()->setModified(false);
+    editor->setProperty("filePath", filePath);
+
+    // 如果是LineNumberEditor，设置文件名以启用语法高亮
+    LineNumberEditor *lineNumberEditor = qobject_cast<LineNumberEditor*>(editor);
+    if (lineNumberEditor) {
+        lineNumberEditor->setFileName(filePath);
+    }
+
+    // 根据文件类型设置是否显示缩进参考线
+    if (filePath.endsWith(".cpp") || filePath.endsWith(".h") ||
+        filePath.endsWith(".py") || filePath.endsWith(".java") ||
+        filePath.endsWith(".js") || filePath.endsWith(".cs")) {
+        lineNumberEditor->setShowIndentationGuides(true);
+    } else {
+        lineNumberEditor->setShowIndentationGuides(false);
+    }
+
+    QFileInfo fileInfo(filePath);
+    int index = tabWidget->addTab(editor, fileInfo.fileName());
+    tabWidget->setCurrentIndex(index);
+
+    // 添加到左侧文件树
+    addFileToList(filePath);
+
+    // 在树中选中该文件
+    selectFileInTree(filePath);
+
+    // 更新最近文件列表
+    m_recentFiles.removeAll(filePath);  // 移除旧的
+    m_recentFiles.prepend(filePath);     // 添加到开头
+
+    // 限制数量
+    while (m_recentFiles.size() > MAX_RECENT_FILES) {
+        m_recentFiles.removeLast();
+    }
+
+    // 立即保存
+    saveFileList();
+
+    saveAct->setEnabled(false);
+    saveAsAct->setEnabled(true);
+    closeAct->setEnabled(true);
+
+    updateWindowTitle();
+    updateStatusBar();
+}
+
+// 槽函数实现
+void MainWindow::newFile()
+{
+    QPlainTextEdit *editor = createEditor();
+    int index = tabWidget->addTab(editor, "无标题");
+    tabWidget->setCurrentIndex(index);
+
+    // 如果是LineNumberEditor，清除语法高亮
+    LineNumberEditor *lineNumberEditor = qobject_cast<LineNumberEditor*>(editor);
+    if (lineNumberEditor) {
+        lineNumberEditor->setFileName("");
+    }
+
+    // 启用保存和关闭按钮
+    saveAct->setEnabled(false);
+    saveAsAct->setEnabled(true);
+    closeAct->setEnabled(true);
+
+    updateWindowTitle();
+    updateStatusBar();
+}
+
+bool MainWindow::saveFile()
+{
+    QPlainTextEdit *editor = getCurrentEditor();
+    if (!editor) return false;
+
+    QString filePath = editor->property("filePath").toString();
+    if (filePath.isEmpty()) {
+        return saveFileAs();
+    }
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, "错误", "无法保存文件: " + filePath);
+        return false;
+    }
+
+    QTextStream out(&file);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    out.setCodec("UTF-8");
+#else
+    out.setEncoding(QStringConverter::Utf8);
+#endif
+    out << editor->toPlainText();
+    file.close();
+
+    editor->document()->setModified(false);
+    saveAct->setEnabled(false);
+
+    updateWindowTitle();
+    statusBar()->showMessage("文件保存成功", 2000);
+    return true;
+}
+
+bool MainWindow::saveFileAs()
+{
+    QPlainTextEdit *editor = getCurrentEditor();
+    if (!editor) return false;
+
+    QString filePath = QFileDialog::getSaveFileName(this, "另存为",
+                                                    QDir::homePath(),
+                                                    "所有文件 (*.*);;"
+                                                    "文本文件 (*.txt);;"
+                                                    "C++文件 (*.cpp *.h *.hpp);;"
+                                                    "Markdown文件 (*.md)");
+    if (filePath.isEmpty()) {
+        return false;
+    }
+
+    editor->setProperty("filePath", filePath);
+    QFileInfo fileInfo(filePath);
+    tabWidget->setTabText(tabWidget->currentIndex(), fileInfo.fileName());
+
+    // 设置文件名以启用语法高亮
+    LineNumberEditor *lineNumberEditor = qobject_cast<LineNumberEditor*>(editor);
+    if (lineNumberEditor) {
+        lineNumberEditor->setFileName(filePath);
+    }
+
+    // 添加到左侧文件树
+    addFileToList(filePath);
+
+    return saveFile();
+}
+
+void MainWindow::closeTab(int index)
+{
+    if (index == -1) {
+        index = tabWidget->currentIndex();
+    }
+
+    if (index < 0) return;
+
+    QPlainTextEdit *editor = qobject_cast<QPlainTextEdit*>(tabWidget->widget(index));
+    if (editor && editor->document()->isModified()) {
+        if (!maybeSave()) {
+            return;
+        }
+    }
+
+    // 获取文件路径，准备从树中移除
+    QString filePath = editor ? editor->property("filePath").toString() : QString();
+
+    tabWidget->removeTab(index);
+    delete editor;
+
+    // 如果文件已关闭，从树中移除对应的项
+    // if (!filePath.isEmpty()) {
+    //     removeFileFromTree(filePath);
+    //     m_recentFiles.removeAll(filePath);
+    // }
+
+    // 更新按钮状态
+    updateButtonStates();
+
+    updateWindowTitle();
+    updateStatusBar();
+    updateEditActions();
+
+    // 保存更新后的文件列表
+    saveFileList();
+}
+
+void MainWindow::updateButtonStates()
+{
+    bool hasTabs = (tabWidget->count() > 0);
+    bool hasEditor = getCurrentEditor() != nullptr;
+
+    // 文件操作按钮
+    saveAct->setEnabled(hasEditor && hasTabs);
+    saveAsAct->setEnabled(hasEditor && hasTabs);
+    closeAct->setEnabled(hasEditor && hasTabs);
+
+    // 如果没有打开的标签页，禁用所有编辑相关操作
+    if (!hasTabs || !hasEditor) {
+        undoAct->setEnabled(false);
+        redoAct->setEnabled(false);
+        cutAct->setEnabled(false);
+        copyAct->setEnabled(false);
+    }
+}
+
+void MainWindow::showFindDialog()
+{
+    qDebug() << "showFindDialog() called";
+
+    if (!m_findReplaceDialog) {
+        qDebug() << "Creating new FindReplaceDialog";
+        m_findReplaceDialog = new FindReplaceDialog(this);
+    }
+
+    QPlainTextEdit *editor = getCurrentEditor();
+    qDebug() << "Current editor:" << editor;
+
+    if (editor) {
+        m_findReplaceDialog->setTextEdit(editor);
+        m_findReplaceDialog->showFind();
+    } else {
+        QMessageBox msgBox(this);
+        msgBox.setWindowTitle("提示");
+        msgBox.setText("请先打开一个文件");
+        msgBox.setIcon(QMessageBox::Information);
+        msgBox.setStandardButtons(QMessageBox::Ok);
+
+        // 使用样式表强制设置标题标签的宽度
+        msgBox.setStyleSheet(
+            "QLabel#qt_msgbox_label { min-width: 150px; }"
+            );
+
+        msgBox.exec();
+    }
+}
+
+void MainWindow::showReplaceDialog()
+{
+    qDebug() << "showReplaceDialog() called - ";
+
+    if (!m_findReplaceDialog) {
+        qDebug() << "Creating new FindReplaceDialog";
+        m_findReplaceDialog = new FindReplaceDialog(this);
+    }
+
+    QPlainTextEdit *editor = getCurrentEditor();
+    qDebug() << "Current editor:" << editor;
+
+    if (editor) {
+        m_findReplaceDialog->setTextEdit(editor);
+        m_findReplaceDialog->showReplace();
+    } else {
+        QMessageBox msgBox(this);
+        msgBox.setWindowTitle("提示");
+        msgBox.setText("请先打开一个文件");
+        msgBox.setIcon(QMessageBox::Information);
+        msgBox.setStandardButtons(QMessageBox::Ok);
+
+        // 使用样式表强制设置标题标签的宽度
+        msgBox.setStyleSheet(
+            "QLabel#qt_msgbox_label { min-width: 150px; }"
+            );
+
+        msgBox.exec();
+    }
+
+}
+
+void MainWindow::openFileFromCommandLine(const QString &filePath)
+{
+    // 检查文件是否存在
+    QFileInfo fileInfo(filePath);
+    if (!fileInfo.exists() || !fileInfo.isFile()) {
+        qDebug() << "文件不存在:" << filePath;
+        return;
+    }
+
+    // 获取绝对路径
+    QString absolutePath = fileInfo.absoluteFilePath();
+
+    // 检查文件是否已经在标签页中打开
+    for (int i = 0; i < tabWidget->count(); ++i) {
+        QPlainTextEdit *editor = qobject_cast<QPlainTextEdit*>(tabWidget->widget(i));
+        if (editor && editor->property("filePath").toString() == absolutePath) {
+            // 如果已打开，切换到该标签页
+            tabWidget->setCurrentIndex(i);
+
+            // 在文件树中定位
+            selectFileInTree(absolutePath);
+            return;
+        }
+    }
+
+    // 打开文件
+    QFile file(absolutePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, "错误", "无法打开文件: " + absolutePath);
+        return;
+    }
+
+    QTextStream in(&file);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    in.setCodec("UTF-8");
+#else
+    in.setEncoding(QStringConverter::Utf8);
+#endif
+    QString content = in.readAll();
+    file.close();
+
+    QPlainTextEdit *editor = createEditor();
+    editor->setPlainText(content);
+    editor->document()->setModified(false);
+    editor->setProperty("filePath", absolutePath);
+
+    // 如果是LineNumberEditor，设置文件名以启用语法高亮
+    LineNumberEditor *lineNumberEditor = qobject_cast<LineNumberEditor*>(editor);
+    if (lineNumberEditor) {
+        lineNumberEditor->setFileName(absolutePath);
+    }
+
+    // 根据文件类型设置是否显示缩进参考线
+    if (absolutePath.endsWith(".cpp") || absolutePath.endsWith(".h") ||
+        absolutePath.endsWith(".py") || absolutePath.endsWith(".java") ||
+        absolutePath.endsWith(".js") || absolutePath.endsWith(".cs")) {
+        lineNumberEditor->setShowIndentationGuides(true);
+    } else {
+        lineNumberEditor->setShowIndentationGuides(false);
+    }
+
+    int index = tabWidget->addTab(editor, fileInfo.fileName());
+    tabWidget->setCurrentIndex(index);
+
+    // 添加到左侧文件树
+    addFileToList(absolutePath);
+
+    // 在树中选中该文件
+    selectFileInTree(absolutePath);
+
+    saveAct->setEnabled(false);
+    saveAsAct->setEnabled(true);
+    closeAct->setEnabled(true);
+
+    updateWindowTitle();
+    updateStatusBar();
+
+    // 确保窗口显示在前台
+    raise();
+    activateWindow();
+}
+
+void MainWindow::undo()
+{
+    QPlainTextEdit *editor = getCurrentEditor();
+    if (editor) editor->undo();
+}
+
+void MainWindow::redo()
+{
+    QPlainTextEdit *editor = getCurrentEditor();
+    if (editor) editor->redo();
+}
+
+void MainWindow::cut()
+{
+    QPlainTextEdit *editor = getCurrentEditor();
+    if (editor) editor->cut();
+}
+
+void MainWindow::copy()
+{
+    QPlainTextEdit *editor = getCurrentEditor();
+    if (editor) editor->copy();
+}
+
+void MainWindow::paste()
+{
+    QPlainTextEdit *editor = getCurrentEditor();
+    if (editor) editor->paste();
+}
+
+void MainWindow::toggleFileList(bool visible)
+{
+    leftPanel->setVisible(visible);
+    if (!visible) {
+        mainSplitter->setSizes(QList<int>() << 0 << 800 << (previewVisible ? 300 : 0));
+    } else {
+        mainSplitter->setSizes(QList<int>() << 200 << 600 << (previewVisible ? 300 : 0));
+    }
+}
+
+void MainWindow::togglePreview(bool visible)
+{
+    previewVisible = visible;
+    previewPanel->setVisible(visible);
+
+    if (visible) {
+        mainSplitter->setSizes(QList<int>() << 200 << 500 << 300);
+    } else {
+        mainSplitter->setSizes(QList<int>() << 200 << 600 << 0);
+    }
+}
+
+void MainWindow::onTextChanged()
+{
+    QPlainTextEdit *editor = getCurrentEditor();
+    if (editor) {
+        bool modified = editor->document()->isModified();
+        saveAct->setEnabled(modified);
+
+        // 更新窗口标题的修改标记
+        updateWindowTitle();
+
+        // 如果是Markdown文件，更新预览
+        if (previewVisible) {
+            QString filePath = getCurrentFilePath();
+            if (filePath.endsWith(".md")) {
+                previewPanel->setPlainText(editor->toPlainText());
+            }
+        }
+    }
+}
+
+void MainWindow::updateWindowTitle()
+{
+    if (tabWidget->count() == 0) {
+        setWindowTitle("ink");
+        return;
+    }
+
+    QPlainTextEdit *editor = getCurrentEditor();
+    if (!editor) {
+        setWindowTitle("ink");
+        return;
+    }
+
+    QString filePath = getCurrentFilePath();
+    QString title = "ink";
+
+    if (filePath.isEmpty()) {
+        title += " - 无标题";
+    } else {
+        title += " - " + removeFileExtension(QFileInfo(filePath).fileName());
+    }
+
+    if (editor->document()->isModified()) {
+        title += " *";
+    }
+
+    setWindowTitle(title);
+}
+
+void MainWindow::updateStatusBar()
+{
+    if (tabWidget->count() == 0) {
+        statusPosition->setText("就绪");
+        statusFileInfo->setText("未打开任何文件");
+        return;
+    }
+
+    QPlainTextEdit *editor = getCurrentEditor();
+    if (!editor) {
+        statusPosition->setText("就绪");
+        statusFileInfo->setText("");
+        return;
+    }
+
+    QTextCursor cursor = editor->textCursor();
+    int line = cursor.blockNumber() + 1;
+    int column = cursor.columnNumber() + 1;
+    int totalLines = editor->document()->blockCount();
+
+    statusPosition->setText(QString("行: %1, 列: %2, 总行: %3").arg(line).arg(column).arg(totalLines));
+
+    QString filePath = getCurrentFilePath();
+    if (filePath.isEmpty()) {
+        statusFileInfo->setText("未保存");
+    } else {
+        QFileInfo info(filePath);
+        statusFileInfo->setText(removeFileExtension(info.fileName()) + " | " +
+                                QString::number(info.size() / 1024.0, 'f', 2) + " KB");
+    }
+}
+
+void MainWindow::currentTabChanged(int index)
+{
+    // 如果没有标签页，不执行后续操作
+    if (index < 0) {
+        updateWindowTitle();
+        updateStatusBar();
+        updateEditActions();
+        return;
+    }
+
+    updateWindowTitle();
+    updateStatusBar();
+    updateEditActions();
+
+    // 切换标签时，自动定位到树中的对应文件
+    QString filePath = getCurrentFilePath();
+    if (!filePath.isEmpty()) {
+        selectFileInTree(filePath);  // 使用完整路径定位
+    }
+
+    // 更新查找对话框的编辑器
+    if (m_findReplaceDialog && m_findReplaceDialog->isVisible()) {
+        m_findReplaceDialog->setTextEdit(getCurrentEditor());
+    }
+}
+
+void MainWindow::updateEditActions()
+{
+    if (tabWidget->count() == 0) {
+        undoAct->setEnabled(false);
+        redoAct->setEnabled(false);
+        cutAct->setEnabled(false);
+        copyAct->setEnabled(false);
+        pasteAct->setEnabled(false);
+        return;
+    }
+
+    QPlainTextEdit *editor = getCurrentEditor();
+    if (editor) {
+        cutAct->setEnabled(editor->textCursor().hasSelection());
+        copyAct->setEnabled(editor->textCursor().hasSelection());
+    }
+}
+
+void MainWindow::showAboutDialog()
+{
+    QMessageBox::about(this, "关于 ink",
+                       "<h2>ink 文本编辑器</h2>"
+                       "<p>版本 0.1.0</p>"
+                       "<p>一个简洁、有序的跨平台文本编辑器</p>"
+                       "<p>功能特点：</p>"
+                       "<ul>"
+                       "<li>多标签页编辑</li>"
+                       "<li>树形文件列表（按目录组织）</li>"
+                       "<li>Markdown预览</li>"
+                       "<li>代码高亮（待实现）</li>"
+                       "<li>跨平台支持</li>"
+                       "</ul>"
+                       "<p>基于 Qt " QT_VERSION_STR " 构建</p>");
+}
+
+// 工具函数实现
+bool MainWindow::maybeSave()
+{
+    QPlainTextEdit *editor = getCurrentEditor();
+    if (!editor || !editor->document()->isModified()) {
+        return true;
+    }
+
+    QString filePath = editor->property("filePath").toString();
+    QString fileName = filePath.isEmpty() ? "无标题" : QFileInfo(filePath).fileName();
+
+    QMessageBox::StandardButton ret;
+    ret = QMessageBox::warning(this, "ink",
+                               QString("文档 \"%1\" 已被修改，是否保存更改？").arg(fileName),
+                               QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+
+    if (ret == QMessageBox::Save) {
+        return saveFile();
+    } else if (ret == QMessageBox::Cancel) {
+        return false;
+    }
+
+    return true;
+}
+
+QString MainWindow::getCurrentFilePath() const
+{
+    QPlainTextEdit *editor = getCurrentEditor();
+    if (editor) {
+        return editor->property("filePath").toString();
+    }
+    return QString();
+}
+
+QPlainTextEdit* MainWindow::getCurrentEditor() const
+{
+    if (tabWidget->count() == 0) {
+        return nullptr;
+    }
+    return qobject_cast<QPlainTextEdit*>(tabWidget->currentWidget());
+}
+
+// 添加文件列表保存函数
+void MainWindow::saveFileList()
+{
+    QSettings settings("ink", "Settings");
+
+    // 获取当前所有打开的文件
+    QStringList currentFiles;
+    for (int i = 0; i < tabWidget->count(); ++i) {
+        QPlainTextEdit *editor = qobject_cast<QPlainTextEdit*>(tabWidget->widget(i));
+        if (editor) {
+            QString filePath = editor->property("filePath").toString();
+            if (!filePath.isEmpty() && QFile::exists(filePath)) {
+                currentFiles.append(filePath);
+            }
+        }
+    }
+
+    // 合并现有文件列表，去重并保持最近的文件在前面
+    QStringList allFiles = currentFiles;
+    for (const QString &file : m_recentFiles) {
+        if (!allFiles.contains(file) && QFile::exists(file)) {
+            allFiles.append(file);
+        }
+    }
+
+    // 限制数量
+    while (allFiles.size() > MAX_RECENT_FILES) {
+        allFiles.removeLast();
+    }
+
+    // 保存
+    settings.setValue("recentFiles", allFiles);
+    qDebug() << "Saved files:" << allFiles.size();
+}
+
+// 添加文件列表加载函数
+void MainWindow::loadFileList()
+{
+    QSettings settings("ink", "Settings");
+
+    // 读取最近打开的文件列表
+    m_recentFiles = settings.value("recentFiles").toStringList();
+
+    qDebug() << "Loading files:" << m_recentFiles.size();
+
+    // 清除现有的文件树
+    fileTree->clear();
+    filePathMap.clear();
+
+    // 重新添加文件到树中
+    for (const QString &filePath : m_recentFiles) {
+        if (QFile::exists(filePath)) {
+            addFileToList(filePath);
+            qDebug() << "Added to tree:" << filePath;
+        }
+    }
+
+    // 展开所有目录
+    fileTree->expandAll();
 }

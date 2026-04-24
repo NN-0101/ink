@@ -1,40 +1,47 @@
-/**
- * @file main.cpp
- * @brief 程序主入口文件
- * 
- * 这个文件包含程序的 main 函数，是应用程序的启动点。
- * 它创建 QApplication 实例和主窗口，然后启动事件循环。
- */
-
 #include "mainwindow.h"
 #include <QApplication>
+#include <QFileInfo>
+#include <QDir>
+#include <QTimer>
+#include <QMessageBox>
 
-/**
- * @brief 程序主入口函数
- * @param argc 命令行参数个数
- * @param argv 命令行参数数组
- * @return 程序退出码
- * 
- * 函数执行流程：
- * 1. 创建 QApplication 实例，初始化 Qt 应用程序框架
- * 2. 创建 MainWindow 实例，构建主窗口
- * 3. 显示主窗口
- * 4. 启动 Qt 事件循环，等待用户交互
- * 
- * Qt 事件循环会处理用户输入、定时器、网络事件等，
- * 直到应用程序退出（如关闭主窗口）。
- */
 int main(int argc, char *argv[])
 {
-    // 创建 QApplication 实例，初始化 Qt 应用程序
     QApplication a(argc, argv);
-    
-    // 创建主窗口实例
+
+    // 设置应用程序信息，用于保存设置
+    QApplication::setApplicationName("TidyText");
+    QApplication::setOrganizationName("TidyText");
+    QApplication::setApplicationVersion("1.0.0");
+
     MainWindow w;
-    
-    // 显示主窗口
+
+    // 处理命令行参数
+    QStringList arguments = QApplication::arguments();
+
+    // 第一个参数是程序自身，所以从索引1开始
+    if (arguments.size() > 1) {
+        // 可能有多个文件被选中（但右键菜单通常是一次打开一个文件）
+        for (int i = 1; i < arguments.size(); ++i) {
+            QString filePath = arguments[i];
+
+            // 确保路径格式正确（有些时候传递的路径可能包含引号）
+            filePath = filePath.trimmed();
+            if (filePath.startsWith('"') && filePath.endsWith('"')) {
+                filePath = filePath.mid(1, filePath.length() - 2);
+            }
+
+            // 检查文件是否存在
+            QFileInfo fileInfo(filePath);
+            if (fileInfo.exists() && fileInfo.isFile()) {
+                // 使用 QTimer 确保窗口完全显示后再打开文件
+                QTimer::singleShot(100, [&w, filePath]() {
+                    w.openFileFromCommandLine(filePath);
+                });
+            }
+        }
+    }
+
     w.show();
-    
-    // 启动 Qt 事件循环，等待用户交互
     return a.exec();
 }
