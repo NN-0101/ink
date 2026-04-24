@@ -25,6 +25,7 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         findreplacedialog.h findreplacedialog.cpp
         linenumbereditor.h linenumbereditor.cpp
         syntaxhighlighter.h syntaxhighlighter.cpp
+        resources.qrc
     )
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET ink APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
@@ -40,6 +41,10 @@ else()
     else()
         add_executable(ink
             ${PROJECT_SOURCES}
+            findreplacedialog.h findreplacedialog.cpp
+            linenumbereditor.h linenumbereditor.cpp
+            syntaxhighlighter.h syntaxhighlighter.cpp
+            resources.qrc
         )
     endif()
 endif()

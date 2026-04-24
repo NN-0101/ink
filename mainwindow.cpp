@@ -730,72 +730,15 @@ void MainWindow::cleanupEmptyDirectories(QTreeWidgetItem *item)
     }
 }
 
-// 初始化图标映射
+// 初始化图标映射：简化版本，所有文件类型都使用默认图标
 void MainWindow::initIconMap()
 {
     // 清空现有映射
     iconMap.clear();
-
-    // 文本文件
-    iconMap["txt"] = ":/icons/txt";
-    iconMap["text"] = ":/icons/text";
-    iconMap["md"] = ":/icons/markdown";
-    iconMap["markdown"] = ":/icons/markdown";
-
-    // C/C++ 文件
-    iconMap["c"] = ":/icons/cpp";
-    iconMap["cpp"] = ":/icons/cpp";
-    iconMap["cc"] = ":/icons/cpp";
-    iconMap["cxx"] = ":/icons/cpp";
-    iconMap["h"] = ":/icons/h";
-    iconMap["hh"] = ":/icons/h";
-    iconMap["hpp"] = ":/icons/h";
-    iconMap["hxx"] = ":/icons/h";
-
-    // 脚本语言
-    iconMap["py"] = ":/icons/python";
-    iconMap["pyw"] = ":/icons/python";
-    iconMap["js"] = ":/icons/js";
-    iconMap["jsx"] = ":/icons/js";
-    iconMap["ts"] = ":/icons/js";
-    iconMap["tsx"] = ":/icons/js";
-    iconMap["java"] = ":/icons/java";
-    iconMap["class"] = ":/icons/java";
-
-    // Web 文件
-    iconMap["html"] = ":/icons/html";
-    iconMap["htm"] = ":/icons/html";
-    iconMap["xhtml"] = ":/icons/html";
-    iconMap["css"] = ":/icons/css";
-    iconMap["scss"] = ":/icons/css";
-    iconMap["sass"] = ":/icons/css";
-    iconMap["less"] = ":/icons/css";
-
-    // 数据文件
-    iconMap["xml"] = ":/icons/xml";
-    iconMap["json"] = ":/icons/json";
-    iconMap["yml"] = ":/icons/yaml";
-    iconMap["yaml"] = ":/icons/yaml";
-    iconMap["toml"] = ":/icons/toml";
-    iconMap["ini"] = ":/icons/ini";
-    iconMap["conf"] = ":/icons/ini";
-    iconMap["cfg"] = ":/icons/ini";
-
-    // 脚本文件
-    iconMap["sh"] = ":/icons/sh";
-    iconMap["bash"] = ":/icons/sh";
-    iconMap["zsh"] = ":/icons/sh";
-    iconMap["bat"] = ":/icons/bat";
-    iconMap["cmd"] = ":/icons/bat";
-    iconMap["ps1"] = ":/icons/ps1";
-
-    // 其他编程语言（根据需要添加）
-    iconMap["go"] = ":/icons/go";
-    iconMap["rs"] = ":/icons/rust";
-    iconMap["php"] = ":/icons/php";
-    iconMap["rb"] = ":/icons/ruby";
-    iconMap["swift"] = ":/icons/swift";
-    iconMap["kt"] = ":/icons/kotlin";
+    
+    // 只保留一个默认图标映射，所有文件类型都使用默认文件图标
+    // 文件夹图标已在其他地方设置
+    // 默认文件图标路径为 ":/icons/file"
 }
 
 // 从树中移除文件
@@ -874,18 +817,12 @@ void MainWindow::addFileToList(const QString &filePath)
     fileItem->setText(0, displayName);
     fileItem->setData(0, Qt::UserRole, filePath);  // 存储完整路径
 
-    // 根据文件类型设置图标（保持原有代码）
+    // 设置文件图标：文件夹使用特定图标，所有文件类型都使用默认文件图标
     if (fileInfo.isDir()) {
         fileItem->setIcon(0, QIcon(":/icons/folder"));
     } else {
-        QString suffix = fileInfo.suffix().toLower();
-        QString iconPath;
-        if (iconMap.contains(suffix)) {
-            iconPath = iconMap[suffix];
-        } else {
-            iconPath = ":/icons/file";
-        }
-        fileItem->setIcon(0, QIcon(iconPath));
+        // 所有文件类型都使用默认文件图标，简化图标映射
+        fileItem->setIcon(0, QIcon(":/icons/file"));
     }
 
     // 保存映射关系 - 使用完整路径作为键，避免文件名冲突
