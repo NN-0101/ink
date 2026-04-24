@@ -141,7 +141,7 @@ MainWindow::MainWindow(QWidget *parent)
         );
     
     // 设置窗口属性
-    setWindowTitle("ink - 无标题");
+    setWindowTitle("INK - 无标题");
     resize(1200, 800);
 
     // 初始化UI
@@ -157,7 +157,7 @@ MainWindow::MainWindow(QWidget *parent)
     installEventFilter(this);
 
     // 加载设置
-    QSettings settings("ink", "Settings");
+    QSettings settings("INK", "Settings");
     restoreGeometry(settings.value("geometry").toByteArray());
     mainSplitter->restoreState(settings.value("splitterState").toByteArray());
     previewVisible = settings.value("previewVisible", false).toBool();
@@ -196,7 +196,7 @@ MainWindow::MainWindow(QWidget *parent)
 MainWindow::~MainWindow()
 {
     // 保存设置
-    QSettings settings("ink", "Settings");
+    QSettings settings("INK", "Settings");
     settings.setValue("geometry", saveGeometry());
     settings.setValue("splitterState", mainSplitter->saveState());
     settings.setValue("previewVisible", previewVisible);
@@ -1261,18 +1261,18 @@ void MainWindow::onTextChanged()
 void MainWindow::updateWindowTitle()
 {
     if (tabWidget->count() == 0) {
-        setWindowTitle("ink");
+        setWindowTitle("INK");
         return;
     }
 
     QPlainTextEdit *editor = getCurrentEditor();
     if (!editor) {
-        setWindowTitle("ink");
+        setWindowTitle("INK");
         return;
     }
 
     QString filePath = getCurrentFilePath();
-    QString title = "ink";
+    QString title = "INK";
 
     if (filePath.isEmpty()) {
         title += " - 无标题";
@@ -1392,7 +1392,7 @@ bool MainWindow::maybeSave()
     QString fileName = filePath.isEmpty() ? "无标题" : QFileInfo(filePath).fileName();
 
     QMessageBox::StandardButton ret;
-    ret = QMessageBox::warning(this, "ink",
+    ret = QMessageBox::warning(this, "INK",
                                QString("文档 \"%1\" 已被修改，是否保存更改？").arg(fileName),
                                QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
 
