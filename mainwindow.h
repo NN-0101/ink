@@ -20,6 +20,7 @@ class QWidget;
 class QPushButton;
 class LineNumberEditor;
 class FindReplaceDialog;
+class FileManage;
 
 class MainWindow : public QMainWindow
 {
@@ -73,10 +74,6 @@ private slots:
     void showFindDialog();
     void showReplaceDialog();
 
-    // 文件列表持久化
-    void saveFileList();
-    void loadFileList();
-
 private:
     // 初始化函数
     void initUI();
@@ -89,23 +86,9 @@ private:
     // 工具函数
     QPlainTextEdit* createEditor();
     void openFileFromPath(const QString &filePath);
-    void addFileToList(const QString &filePath);
     bool maybeSave();
     QString getCurrentFilePath() const;
     QPlainTextEdit* getCurrentEditor() const;
-    QString removeFileExtension(const QString &fileName);
-
-    // 文件树相关函数
-    QTreeWidgetItem* findOrCreateParentItem(const QString &dirPath);
-    void selectFileInTree(const QString &filePath);
-    void removeFileFromTree(const QString &filePath);
-
-    // 文件树辅助函数
-    QTreeWidgetItem* findFileItemInTree(QTreeWidgetItem *parent, const QString &filePath, const QString &displayName);
-    void cleanupEmptyDirectories(QTreeWidgetItem *item);
-
-    // 初始化图标映射
-    void initIconMap();
 
     // UI 组件
     QSplitter *mainSplitter;
@@ -118,8 +101,6 @@ private:
     QPushButton *locateBtn;
     QPushButton *expandBtn;
     QPushButton *foldBtn;
-    QPushButton *addFileBtn;
-    QPushButton *openFileBtn;
 
     // 菜单
     QMenu *fileMenu;
@@ -145,6 +126,7 @@ private:
     QAction *togglePreviewAct;
 
     FindReplaceDialog *m_findReplaceDialog;
+    FileManage *m_fileManage;
 
     QAction *aboutAct;
 
@@ -154,17 +136,6 @@ private:
 
     // 状态
     bool previewVisible;
-
-    // 文件路径映射：显示名 -> 完整路径
-    QMap<QString, QString> filePathMap;
-
-    // 文件图标映射
-    QMap<QString, QString> iconMap;
-
-    // 最近打开的文件列表
-    QStringList m_recentFiles;
-    // 最大保存文件数量
-    static const int MAX_RECENT_FILES = 100;
 };
 
 #endif // MAINWINDOW_H

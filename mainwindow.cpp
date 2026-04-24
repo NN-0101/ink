@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "linenumbereditor.h"
 #include "findreplacedialog.h"
+#include "filemanage.h"
 #include <QApplication>
 #include <QSplitter>
 #include <QTreeWidget>
@@ -87,15 +88,13 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , previewVisible(false)
     , m_findReplaceDialog(nullptr)
+    , m_fileManage(new FileManage(this))
 {
     // 设置窗口图标
     setWindowIcon(QIcon(":/icons/icon"));
     // 设置窗口属性
     setWindowTitle("ink - 无标题");
     resize(1200, 800);
-
-    // 初始化图标映射
-    initIconMap();
 
     // 初始化UI
     initUI();
@@ -124,8 +123,26 @@ MainWindow::MainWindow(QWidget *parent)
     // 创建查找替换对话框（延迟创建）
     m_findReplaceDialog = new FindReplaceDialog(this);
 
-    // 加载上次打开的文件列表
-    loadFileList();
+    // 连接FileManage信号
+    connect(m_fileManage, &FileManage::fileTreeUpdated, this, [this]() {
+        // 文件树更新后可能需要刷新显示
+        fileTree->update();
+    });
+
+    connect(m_fileManage, &FileManage::recentFilesUpdated, this, [this](const QStringList &recentFiles) {
+        // 可以在这里更新最近文件菜单
+        // 暂时不需要实现
+    });
+
+    // 从FileManage加载文件列表
+    QStringList recentFiles = m_fileManage->loadFileList();
+    for (const QString &filePath : recentFiles) {
+        if (QFile::exists(filePath)) {
+            m_fileManage->addFileToList(filePath, fileTree);
+        }
+    }
+    // 展开所有目录
+    fileTree->expandAll();
 }
 
 MainWindow::~MainWindow()
@@ -136,8 +153,18 @@ MainWindow::~MainWindow()
     settings.setValue("splitterState", mainSplitter->saveState());
     settings.setValue("previewVisible", previewVisible);
 
-    // 保存文件列表
-    saveFileList();
+    // 保存当前打开的文件列表
+    QStringList openFiles;
+    for (int i = 0; i < tabWidget->count(); ++i) {
+        QPlainTextEdit *editor = qobject_cast<QPlainTextEdit*>(tabWidget->widget(i));
+        if (editor) {
+            QString filePath = editor->property("filePath").toString();
+            if (!filePath.isEmpty() && QFile::exists(filePath)) {
+                openFiles.append(filePath);
+            }
+        }
+    }
+    m_fileManage->saveFileList(openFiles, m_fileManage->getRecentFiles());
 
     delete m_findReplaceDialog;
 }
@@ -461,7 +488,6 @@ void MainWindow::initFileList()
 {
     // 初始为空，不需要添加任何项目
     fileTree->clear();
-    filePathMap.clear();
 
     // 设置文件树样式 - 移除标题后的样式
     fileTree->setStyleSheet(
@@ -583,186 +609,28 @@ void MainWindow::initConnections()
     });
 }
 
-// 查找或创建父目录项
-QTreeWidgetItem* MainWindow::findOrCreateParentItem(const QString &dirPath)
-{
-    QDir dir(dirPath);
-    QString relativePath = dir.absolutePath();
 
-    QTreeWidgetItem *currentParent = fileTree->invisibleRootItem();
-
-    QStringList pathParts;
-#if defined(Q_OS_WIN)
-    // Windows路径处理
-    if (relativePath.contains(':')) {
-        // 包含盘符，作为第一级
-        QString drive = relativePath.left(relativePath.indexOf(':') + 2);
-        pathParts.append(drive);
-        relativePath = relativePath.mid(drive.length());
-    }
-    QStringList parts = relativePath.split('\\', Qt::SkipEmptyParts);
-#else
-    // Unix-like路径
-    if (relativePath.startsWith('/')) {
-        pathParts.append("/");
-        relativePath = relativePath.mid(1);
-    }
-    QStringList parts = relativePath.split('/', Qt::SkipEmptyParts);
-#endif
-
-    pathParts.append(parts);
-
-    // 逐级查找或创建
-    for (const QString &part : pathParts) {
-        if (part.isEmpty()) continue;
-
-        bool found = false;
-        for (int i = 0; i < currentParent->childCount(); ++i) {
-            if (currentParent->child(i)->text(0) == part) {
-                currentParent = currentParent->child(i);
-                found = true;
-                break;
-            }
-        }
-
-        if (!found) {
-            QTreeWidgetItem *newItem = new QTreeWidgetItem(currentParent);
-            newItem->setText(0, part);
-            newItem->setData(0, Qt::UserRole, QString()); // 目录项不存储完整路径
-
-            // 为目录项设置文件夹图标
-            newItem->setIcon(0, QIcon(":/icons/folder"));
-
-            currentParent = newItem;
-        }
-    }
-
-    return currentParent;
-}
 
 // 定位当前文件
 void MainWindow::locateCurrentFile()
 {
     QString filePath = getCurrentFilePath();
-    if (!filePath.isEmpty()) {
-        selectFileInTree(filePath);
-    }
+    m_fileManage->locateCurrentFile(filePath, fileTree);
 }
 
 // 展开所有文件
 void MainWindow::expandAllFiles()
 {
-    fileTree->expandAll();
+    m_fileManage->expandAllFiles(fileTree);
 }
 
 // 折叠所有文件
 void MainWindow::collapseAllFiles()
 {
-    fileTree->collapseAll();
+    m_fileManage->collapseAllFiles(fileTree);
 }
 
-// 在树中选择文件
-void MainWindow::selectFileInTree(const QString &filePath)
-{
-    QFileInfo fileInfo(filePath);
-    QString displayName = fileInfo.fileName();
 
-    // 使用完整路径查找文件项
-    QTreeWidgetItem *fileItem = findFileItemInTree(fileTree->invisibleRootItem(), filePath, displayName);
-    if (fileItem) {
-        fileTree->setCurrentItem(fileItem);
-        fileTree->scrollToItem(fileItem);
-
-        // 展开所有父级目录
-        QTreeWidgetItem *parent = fileItem->parent();
-        while (parent) {
-            parent->setExpanded(true);
-            parent = parent->parent();
-        }
-    } else {
-        // 如果找不到，可能是因为文件还未添加到树中
-        qDebug() << "File not found in tree:" << filePath;
-    }
-}
-
-// 递归查找文件项
-QTreeWidgetItem* MainWindow::findFileItemInTree(QTreeWidgetItem *parent, const QString &filePath, const QString &displayName)
-{
-    if (!parent) return nullptr;
-
-    // 只检查完整路径是否匹配
-    QString storedPath = parent->data(0, Qt::UserRole).toString();
-    if (!storedPath.isEmpty() && storedPath == filePath) {
-        return parent;
-    }
-
-    // 递归查找子项
-    for (int i = 0; i < parent->childCount(); ++i) {
-        QTreeWidgetItem *child = parent->child(i);
-        QTreeWidgetItem *result = findFileItemInTree(child, filePath, displayName);
-        if (result) {
-            return result;
-        }
-    }
-
-    return nullptr;
-}
-
-// 递归清理空目录
-void MainWindow::cleanupEmptyDirectories(QTreeWidgetItem *item)
-{
-    if (!item) return;
-
-    // 如果是文件项，不处理
-    QString storedPath = item->data(0, Qt::UserRole).toString();
-    if (!storedPath.isEmpty()) {
-        return; // 文件项
-    }
-
-    // 如果没有子项且不是根节点，移除该项
-    if (item->childCount() == 0 && item->parent()) {
-        QTreeWidgetItem *parent = item->parent();
-        parent->removeChild(item);
-        delete item;
-
-        // 继续清理父级目录
-        cleanupEmptyDirectories(parent);
-    }
-}
-
-// 初始化图标映射：简化版本，所有文件类型都使用默认图标
-void MainWindow::initIconMap()
-{
-    // 清空现有映射
-    iconMap.clear();
-    
-    // 只保留一个默认图标映射，所有文件类型都使用默认文件图标
-    // 文件夹图标已在其他地方设置
-    // 默认文件图标路径为 ":/icons/file"
-}
-
-// 从树中移除文件
-void MainWindow::removeFileFromTree(const QString &filePath)
-{
-    QFileInfo fileInfo(filePath);
-    QString displayName = fileInfo.fileName();  // 注意：这里应该使用完整文件名，不是去掉后缀的
-
-    // 使用完整路径查找并移除文件项
-    QTreeWidgetItem *fileItem = findFileItemInTree(fileTree->invisibleRootItem(), filePath, displayName);
-    if (fileItem) {
-        QTreeWidgetItem *parent = fileItem->parent();
-        if (parent) {
-            parent->removeChild(fileItem);
-            delete fileItem;
-
-            // 从映射中移除
-            filePathMap.remove(filePath);
-
-            // 递归清理空目录
-            cleanupEmptyDirectories(parent);
-        }
-    }
-}
 
 QPlainTextEdit* MainWindow::createEditor()
 {
@@ -783,54 +651,9 @@ QPlainTextEdit* MainWindow::createEditor()
     return editor;
 }
 
-// 工具函数：移除文件后缀
-QString MainWindow::removeFileExtension(const QString &fileName)
-{
-    int dotIndex = fileName.lastIndexOf('.');
-    if (dotIndex != -1) {
-        return fileName.left(dotIndex);
-    }
-    return fileName;
-}
 
-// 添加文件到左侧树形列表
-void MainWindow::addFileToList(const QString &filePath)
-{
-    QFileInfo fileInfo(filePath);
-    QString displayName = fileInfo.fileName();  // 保持显示名为文件名
-    QString dirPath = fileInfo.absolutePath();
 
-    // 获取父目录项
-    QTreeWidgetItem *parentItem = findOrCreateParentItem(dirPath);
 
-    // 检查文件是否已经存在 - 使用完整路径检查
-    for (int i = 0; i < parentItem->childCount(); ++i) {
-        QTreeWidgetItem *child = parentItem->child(i);
-        QString storedPath = child->data(0, Qt::UserRole).toString();
-        if (storedPath == filePath) {
-            return;  // 已存在，不重复添加
-        }
-    }
-
-    // 创建文件项
-    QTreeWidgetItem *fileItem = new QTreeWidgetItem(parentItem);
-    fileItem->setText(0, displayName);
-    fileItem->setData(0, Qt::UserRole, filePath);  // 存储完整路径
-
-    // 设置文件图标：文件夹使用特定图标，所有文件类型都使用默认文件图标
-    if (fileInfo.isDir()) {
-        fileItem->setIcon(0, QIcon(":/icons/folder"));
-    } else {
-        // 所有文件类型都使用默认文件图标，简化图标映射
-        fileItem->setIcon(0, QIcon(":/icons/file"));
-    }
-
-    // 保存映射关系 - 使用完整路径作为键，避免文件名冲突
-    filePathMap[filePath] = displayName;  // 修改映射关系
-
-    // 展开父目录
-    parentItem->setExpanded(true);
-}
 
 // 点击左侧文件树项
 void MainWindow::onFileItemClicked(QTreeWidgetItem *item, int column)
@@ -849,7 +672,7 @@ void MainWindow::onFileItemClicked(QTreeWidgetItem *item, int column)
     // 检查文件是否存在
     if (!QFile::exists(filePath)) {
         QMessageBox::warning(this, "文件不存在", "文件已不存在或已被移动: " + filePath);
-        removeFileFromTree(filePath);
+        m_fileManage->removeFileFromTree(filePath, fileTree);
         return;
     }
 
@@ -878,25 +701,12 @@ void MainWindow::openFileFromPath(const QString &filePath)
         }
     }
 
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    QPlainTextEdit *editor = createEditor();
+    if (!m_fileManage->openFile(filePath, editor)) {
         QMessageBox::warning(this, "错误", "无法打开文件: " + filePath);
+        delete editor;
         return;
     }
-
-    QTextStream in(&file);
-#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-    in.setCodec("UTF-8");
-#else
-    in.setEncoding(QStringConverter::Utf8);
-#endif
-    QString content = in.readAll();
-    file.close();
-
-    QPlainTextEdit *editor = createEditor();
-    editor->setPlainText(content);
-    editor->document()->setModified(false);
-    editor->setProperty("filePath", filePath);
 
     // 如果是LineNumberEditor，设置文件名以启用语法高亮
     LineNumberEditor *lineNumberEditor = qobject_cast<LineNumberEditor*>(editor);
@@ -908,9 +718,13 @@ void MainWindow::openFileFromPath(const QString &filePath)
     if (filePath.endsWith(".cpp") || filePath.endsWith(".h") ||
         filePath.endsWith(".py") || filePath.endsWith(".java") ||
         filePath.endsWith(".js") || filePath.endsWith(".cs")) {
-        lineNumberEditor->setShowIndentationGuides(true);
+        if (lineNumberEditor) {
+            lineNumberEditor->setShowIndentationGuides(true);
+        }
     } else {
-        lineNumberEditor->setShowIndentationGuides(false);
+        if (lineNumberEditor) {
+            lineNumberEditor->setShowIndentationGuides(false);
+        }
     }
 
     QFileInfo fileInfo(filePath);
@@ -918,22 +732,23 @@ void MainWindow::openFileFromPath(const QString &filePath)
     tabWidget->setCurrentIndex(index);
 
     // 添加到左侧文件树
-    addFileToList(filePath);
+    m_fileManage->addFileToList(filePath, fileTree);
 
     // 在树中选中该文件
-    selectFileInTree(filePath);
+    m_fileManage->selectFileInTree(filePath, fileTree);
 
-    // 更新最近文件列表
-    m_recentFiles.removeAll(filePath);  // 移除旧的
-    m_recentFiles.prepend(filePath);     // 添加到开头
-
-    // 限制数量
-    while (m_recentFiles.size() > MAX_RECENT_FILES) {
-        m_recentFiles.removeLast();
+    // 保存当前打开的文件列表
+    QStringList openFiles;
+    for (int i = 0; i < tabWidget->count(); ++i) {
+        QPlainTextEdit *ed = qobject_cast<QPlainTextEdit*>(tabWidget->widget(i));
+        if (ed) {
+            QString fp = ed->property("filePath").toString();
+            if (!fp.isEmpty()) {
+                openFiles.append(fp);
+            }
+        }
     }
-
-    // 立即保存
-    saveFileList();
+    m_fileManage->saveFileList(openFiles, m_fileManage->getRecentFiles());
 
     saveAct->setEnabled(false);
     saveAsAct->setEnabled(true);
@@ -975,27 +790,15 @@ bool MainWindow::saveFile()
         return saveFileAs();
     }
 
-    QFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    if (m_fileManage->saveFile(editor)) {
+        saveAct->setEnabled(false);
+        updateWindowTitle();
+        statusBar()->showMessage("文件保存成功", 2000);
+        return true;
+    } else {
         QMessageBox::warning(this, "错误", "无法保存文件: " + filePath);
         return false;
     }
-
-    QTextStream out(&file);
-#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-    out.setCodec("UTF-8");
-#else
-    out.setEncoding(QStringConverter::Utf8);
-#endif
-    out << editor->toPlainText();
-    file.close();
-
-    editor->document()->setModified(false);
-    saveAct->setEnabled(false);
-
-    updateWindowTitle();
-    statusBar()->showMessage("文件保存成功", 2000);
-    return true;
 }
 
 bool MainWindow::saveFileAs()
@@ -1024,9 +827,36 @@ bool MainWindow::saveFileAs()
     }
 
     // 添加到左侧文件树
-    addFileToList(filePath);
+    m_fileManage->addFileToList(filePath, fileTree);
 
-    return saveFile();
+    // 保存文件内容
+    if (m_fileManage->writeFileContent(filePath, editor->toPlainText())) {
+        editor->document()->setModified(false);
+        saveAct->setEnabled(false);
+        updateWindowTitle();
+        statusBar()->showMessage("文件保存成功", 2000);
+        
+        // 添加到最近文件列表
+        m_fileManage->addToRecentFiles(filePath);
+        
+        // 保存文件列表
+        QStringList openFiles;
+        for (int i = 0; i < tabWidget->count(); ++i) {
+            QPlainTextEdit *ed = qobject_cast<QPlainTextEdit*>(tabWidget->widget(i));
+            if (ed) {
+                QString fp = ed->property("filePath").toString();
+                if (!fp.isEmpty()) {
+                    openFiles.append(fp);
+                }
+            }
+        }
+        m_fileManage->saveFileList(openFiles, m_fileManage->getRecentFiles());
+        
+        return true;
+    } else {
+        QMessageBox::warning(this, "错误", "无法保存文件: " + filePath);
+        return false;
+    }
 }
 
 void MainWindow::closeTab(int index)
@@ -1050,12 +880,6 @@ void MainWindow::closeTab(int index)
     tabWidget->removeTab(index);
     delete editor;
 
-    // 如果文件已关闭，从树中移除对应的项
-    // if (!filePath.isEmpty()) {
-    //     removeFileFromTree(filePath);
-    //     m_recentFiles.removeAll(filePath);
-    // }
-
     // 更新按钮状态
     updateButtonStates();
 
@@ -1064,7 +888,17 @@ void MainWindow::closeTab(int index)
     updateEditActions();
 
     // 保存更新后的文件列表
-    saveFileList();
+    QStringList openFiles;
+    for (int i = 0; i < tabWidget->count(); ++i) {
+        QPlainTextEdit *ed = qobject_cast<QPlainTextEdit*>(tabWidget->widget(i));
+        if (ed) {
+            QString fp = ed->property("filePath").toString();
+            if (!fp.isEmpty()) {
+                openFiles.append(fp);
+            }
+        }
+    }
+    m_fileManage->saveFileList(openFiles, m_fileManage->getRecentFiles());
 }
 
 void MainWindow::updateButtonStates()
@@ -1169,62 +1003,13 @@ void MainWindow::openFileFromCommandLine(const QString &filePath)
             tabWidget->setCurrentIndex(i);
 
             // 在文件树中定位
-            selectFileInTree(absolutePath);
+            m_fileManage->selectFileInTree(absolutePath, fileTree);
             return;
         }
     }
 
-    // 打开文件
-    QFile file(absolutePath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QMessageBox::warning(this, "错误", "无法打开文件: " + absolutePath);
-        return;
-    }
-
-    QTextStream in(&file);
-#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-    in.setCodec("UTF-8");
-#else
-    in.setEncoding(QStringConverter::Utf8);
-#endif
-    QString content = in.readAll();
-    file.close();
-
-    QPlainTextEdit *editor = createEditor();
-    editor->setPlainText(content);
-    editor->document()->setModified(false);
-    editor->setProperty("filePath", absolutePath);
-
-    // 如果是LineNumberEditor，设置文件名以启用语法高亮
-    LineNumberEditor *lineNumberEditor = qobject_cast<LineNumberEditor*>(editor);
-    if (lineNumberEditor) {
-        lineNumberEditor->setFileName(absolutePath);
-    }
-
-    // 根据文件类型设置是否显示缩进参考线
-    if (absolutePath.endsWith(".cpp") || absolutePath.endsWith(".h") ||
-        absolutePath.endsWith(".py") || absolutePath.endsWith(".java") ||
-        absolutePath.endsWith(".js") || absolutePath.endsWith(".cs")) {
-        lineNumberEditor->setShowIndentationGuides(true);
-    } else {
-        lineNumberEditor->setShowIndentationGuides(false);
-    }
-
-    int index = tabWidget->addTab(editor, fileInfo.fileName());
-    tabWidget->setCurrentIndex(index);
-
-    // 添加到左侧文件树
-    addFileToList(absolutePath);
-
-    // 在树中选中该文件
-    selectFileInTree(absolutePath);
-
-    saveAct->setEnabled(false);
-    saveAsAct->setEnabled(true);
-    closeAct->setEnabled(true);
-
-    updateWindowTitle();
-    updateStatusBar();
+    // 打开文件 - 直接调用openFileFromPath，它已经集成了FileManage
+    openFileFromPath(absolutePath);
 
     // 确保窗口显示在前台
     raise();
@@ -1322,7 +1107,7 @@ void MainWindow::updateWindowTitle()
     if (filePath.isEmpty()) {
         title += " - 无标题";
     } else {
-        title += " - " + removeFileExtension(QFileInfo(filePath).fileName());
+        title += " - " + m_fileManage->removeFileExtension(QFileInfo(filePath).fileName());
     }
 
     if (editor->document()->isModified()) {
@@ -1359,7 +1144,7 @@ void MainWindow::updateStatusBar()
         statusFileInfo->setText("未保存");
     } else {
         QFileInfo info(filePath);
-        statusFileInfo->setText(removeFileExtension(info.fileName()) + " | " +
+        statusFileInfo->setText(m_fileManage->removeFileExtension(info.fileName()) + " | " +
                                 QString::number(info.size() / 1024.0, 'f', 2) + " KB");
     }
 }
@@ -1381,7 +1166,7 @@ void MainWindow::currentTabChanged(int index)
     // 切换标签时，自动定位到树中的对应文件
     QString filePath = getCurrentFilePath();
     if (!filePath.isEmpty()) {
-        selectFileInTree(filePath);  // 使用完整路径定位
+        m_fileManage->selectFileInTree(filePath, fileTree);  // 使用完整路径定位
     }
 
     // 更新查找对话框的编辑器
@@ -1467,63 +1252,4 @@ QPlainTextEdit* MainWindow::getCurrentEditor() const
     return qobject_cast<QPlainTextEdit*>(tabWidget->currentWidget());
 }
 
-// 添加文件列表保存函数
-void MainWindow::saveFileList()
-{
-    QSettings settings("ink", "Settings");
 
-    // 获取当前所有打开的文件
-    QStringList currentFiles;
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        QPlainTextEdit *editor = qobject_cast<QPlainTextEdit*>(tabWidget->widget(i));
-        if (editor) {
-            QString filePath = editor->property("filePath").toString();
-            if (!filePath.isEmpty() && QFile::exists(filePath)) {
-                currentFiles.append(filePath);
-            }
-        }
-    }
-
-    // 合并现有文件列表，去重并保持最近的文件在前面
-    QStringList allFiles = currentFiles;
-    for (const QString &file : m_recentFiles) {
-        if (!allFiles.contains(file) && QFile::exists(file)) {
-            allFiles.append(file);
-        }
-    }
-
-    // 限制数量
-    while (allFiles.size() > MAX_RECENT_FILES) {
-        allFiles.removeLast();
-    }
-
-    // 保存
-    settings.setValue("recentFiles", allFiles);
-    qDebug() << "Saved files:" << allFiles.size();
-}
-
-// 添加文件列表加载函数
-void MainWindow::loadFileList()
-{
-    QSettings settings("ink", "Settings");
-
-    // 读取最近打开的文件列表
-    m_recentFiles = settings.value("recentFiles").toStringList();
-
-    qDebug() << "Loading files:" << m_recentFiles.size();
-
-    // 清除现有的文件树
-    fileTree->clear();
-    filePathMap.clear();
-
-    // 重新添加文件到树中
-    for (const QString &filePath : m_recentFiles) {
-        if (QFile::exists(filePath)) {
-            addFileToList(filePath);
-            qDebug() << "Added to tree:" << filePath;
-        }
-    }
-
-    // 展开所有目录
-    fileTree->expandAll();
-}
