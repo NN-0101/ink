@@ -92,6 +92,54 @@ MainWindow::MainWindow(QWidget *parent)
 {
     // 设置窗口图标
     setWindowIcon(QIcon(":/icons/icon"));
+    
+    // 设置窗口样式（整体亮色主题）
+    setStyleSheet(
+        "QMainWindow {"
+        "    background-color: #f5f5f5;"
+        "}"
+        "QMenuBar {"
+        "    background-color: #f0f0f0;"
+        "    color: #333333;"
+        "    border-bottom: 1px solid #d0d0d0;"
+        "}"
+        "QMenuBar::item {"
+        "    padding: 4px 8px;"
+        "    background-color: transparent;"
+        "}"
+        "QMenuBar::item:selected {"
+        "    background-color: #e0e0e0;"
+        "    border-radius: 2px;"
+        "}"
+        "QMenuBar::item:pressed {"
+        "    background-color: #d0d0d0;"
+        "}"
+        "QMenu {"
+        "    background-color: #f8f8f8;"
+        "    color: #333333;"
+        "    border: 1px solid #d0d0d0;"
+        "    padding: 2px;"
+        "}"
+        "QMenu::item {"
+        "    padding: 4px 20px;"
+        "}"
+        "QMenu::item:selected {"
+        "    background-color: #007acc;"
+        "    color: #ffffff;"
+        "}"
+        "QMenu::separator {"
+        "    height: 1px;"
+        "    background-color: #d0d0d0;"
+        "    margin: 2px 8px;"
+        "}"
+        "QPushButton {"
+        "    color: #333333;"
+        "}"
+        "QLabel {"
+        "    color: #333333;"
+        "}"
+        );
+    
     // 设置窗口属性
     setWindowTitle("ink - 无标题");
     resize(1200, 800);
@@ -182,7 +230,7 @@ void MainWindow::initUI()
 
     // 文件列表工具栏 - 高度与导航栏保持一致
     QWidget *toolbarWidget = new QWidget(leftPanel);
-    toolbarWidget->setFixedHeight(25);  // 设置与右侧导航栏相同的高度
+    toolbarWidget->setFixedHeight(32);  // 设置稍高的工具栏
     toolbarWidget->setStyleSheet("background-color: #f0f0f0; border-bottom: 1px solid #d0d0d0;");
 
     QHBoxLayout *toolbarLayout = new QHBoxLayout(toolbarWidget);
@@ -211,14 +259,14 @@ void MainWindow::initUI()
         "QPushButton {"
         "    background-color: transparent;"  // 透明背景
         "    border: none;"  // 无边框
-        "    border-radius: 2px;"
-        "    padding: 1px;"
+        "    border-radius: 4px;"
+        "    padding: 4px;"
         "}"
         "QPushButton:hover {"
-        "    background-color: #d0d0d0;"  // 悬停时显示背景
+        "    background-color: #e0e0e0;"  // 浅色悬停背景
         "}"
         "QPushButton:pressed {"
-        "    background-color: #c0c0c0;"  // 按下时显示背景
+        "    background-color: #d0d0d0;"  // 按下时显示背景
         "}"
         );
 
@@ -229,14 +277,14 @@ void MainWindow::initUI()
         "QPushButton {"
         "    background-color: transparent;"
         "    border: none;"
-        "    border-radius: 2px;"
-        "    padding: 1px;"
+        "    border-radius: 4px;"
+        "    padding: 4px;"
         "}"
         "QPushButton:hover {"
-        "    background-color: #d0d0d0;"
+        "    background-color: #e0e0e0;"
         "}"
         "QPushButton:pressed {"
-        "    background-color: #c0c0c0;"
+        "    background-color: #d0d0d0;"
         "}"
         );
 
@@ -247,14 +295,14 @@ void MainWindow::initUI()
         "QPushButton {"
         "    background-color: transparent;"
         "    border: none;"
-        "    border-radius: 2px;"
-        "    padding: 1px;"
+        "    border-radius: 4px;"
+        "    padding: 4px;"
         "}"
         "QPushButton:hover {"
-        "    background-color: #d0d0d0;"
+        "    background-color: #e0e0e0;"
         "}"
         "QPushButton:pressed {"
-        "    background-color: #c0c0c0;"
+        "    background-color: #d0d0d0;"
         "}"
         );
 
@@ -293,7 +341,41 @@ void MainWindow::initUI()
     tabWidget->setMovable(true);
     tabWidget->setDocumentMode(true);
     // 设置标签页的高度，左侧工具栏与其保持一致
-    tabWidget->setStyleSheet("QTabBar::tab { height: 25px; }");
+    tabWidget->setStyleSheet(
+        "QTabWidget::pane {"
+        "    border: none;"
+        "    background-color: #ffffff;"
+        "}"
+        "QTabBar::tab {"
+        "    background-color: #f0f0f0;"
+        "    color: #555555;"
+        "    padding: 6px 12px;"
+        "    margin-right: 2px;"
+        "    border-top-left-radius: 4px;"
+        "    border-top-right-radius: 4px;"
+        "    border: 1px solid #d0d0d0;"
+        "    border-bottom: none;"
+        "    min-width: 80px;"
+        "    height: 18px;"
+        "}"
+        "QTabBar::tab:selected {"
+        "    background-color: #ffffff;"
+        "    color: #007acc;"
+        "    border-bottom: 2px solid #007acc;"
+        "}"
+        "QTabBar::tab:hover:!selected {"
+        "    background-color: #e0e0e0;"
+        "}"
+        "QTabBar::close-button {"
+        "    subcontrol-origin: padding;"
+        "    subcontrol-position: right;"
+        "    padding: 2px;"
+        "}"
+        "QTabBar::close-button:hover {"
+        "    background-color: #e0e0e0;"
+        "    border-radius: 2px;"
+        "}"
+        );
 
     centerLayout->addWidget(tabWidget);
 
@@ -302,6 +384,34 @@ void MainWindow::initUI()
     previewPanel->setReadOnly(true);
     previewPanel->setVisible(previewVisible);
     previewPanel->setMinimumWidth(300);
+    // 设置预览面板样式
+    previewPanel->setStyleSheet(
+        "QTextEdit {"
+        "    background-color: #ffffff;"
+        "    color: #333333;"
+        "    border: none;"
+        "    padding: 10px;"
+        "    font-family: 'Segoe UI', 'Microsoft YaHei', monospace;"
+        "    font-size: 11pt;"
+        "}"
+        "QTextEdit:focus {"
+        "    outline: none;"
+        "}"
+        // 滚动条样式
+        "QScrollBar:vertical {"
+        "    border: none;"
+        "    background: #f0f0f0;"
+        "    width: 12px;"
+        "}"
+        "QScrollBar::handle:vertical {"
+        "    background: #c0c0c0;"
+        "    min-height: 20px;"
+        "    border-radius: 6px;"
+        "}"
+        "QScrollBar::handle:vertical:hover {"
+        "    background: #a0a0a0;"
+        "}"
+        );
 
     // 添加到分割器
     mainSplitter->addWidget(leftPanel);
@@ -429,21 +539,31 @@ void MainWindow::initToolBar()
     // 设置工具栏样式
     toolBar->setStyleSheet(
         "QToolBar {"
-        "    spacing: 2px;"
+        "    spacing: 4px;"
         "    background-color: #f0f0f0;"
         "    border: none;"
         "    border-bottom: 1px solid #d0d0d0;"
+        "    padding: 2px;"
         "}"
         "QToolBar QToolButton {"
-        "    padding: 2px;"
-        "    border-radius: 2px;"
+        "    padding: 4px 6px;"
+        "    border-radius: 4px;"
         "    margin: 1px;"
+        "    color: #333333;"
         "}"
         "QToolBar QToolButton:hover {"
-        "    background-color: #d0d0d0;"
+        "    background-color: #e0e0e0;"
         "}"
         "QToolBar QToolButton:pressed {"
-        "    background-color: #c0c0c0;"
+        "    background-color: #d0d0d0;"
+        "}"
+        "QToolBar QToolButton:disabled {"
+        "    color: #aaaaaa;"
+        "}"
+        "QToolBar::separator {"
+        "    background-color: #d0d0d0;"
+        "    width: 1px;"
+        "    margin: 4px 6px;"
         "}"
         );
 
@@ -480,6 +600,38 @@ void MainWindow::initStatusBar()
     statusPosition = new QLabel("行: 1, 列: 1", this);
     statusFileInfo = new QLabel("就绪", this);
 
+    // 设置状态栏样式
+    statusBar()->setStyleSheet(
+        "QStatusBar {"
+        "    background-color: #f0f0f0;"
+        "    color: #555555;"
+        "    border-top: 1px solid #d0d0d0;"
+        "    padding: 2px;"
+        "}"
+        "QStatusBar::item {"
+        "    border: none;"
+        "}"
+        );
+    
+    // 设置状态栏标签样式
+    statusPosition->setStyleSheet(
+        "QLabel {"
+        "    color: #555555;"
+        "    background: transparent;"
+        "    padding: 0 8px;"
+        "    font-size: 10pt;"
+        "}"
+        );
+    statusFileInfo->setStyleSheet(
+        "QLabel {"
+        "    color: #888888;"
+        "    background: transparent;"
+        "    padding: 0 8px;"
+        "    font-size: 10pt;"
+        "    font-style: italic;"
+        "}"
+        );
+
     statusBar()->addWidget(statusPosition, 1);
     statusBar()->addWidget(statusFileInfo, 2);
 }
@@ -489,28 +641,37 @@ void MainWindow::initFileList()
     // 初始为空，不需要添加任何项目
     fileTree->clear();
 
-    // 设置文件树样式 - 移除标题后的样式
+    // 设置文件树样式 - 亮色主题
     fileTree->setStyleSheet(
         "QTreeWidget {"
         "    border: none;"
         "    background-color: #ffffff;"
         "    outline: 0;"
-        "    font-size: 11pt;"
+        "    font-size: 10pt;"
+        "    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;"
         "}"
         "QTreeWidget::item {"
-        "    padding: 3px 2px;"  // 更紧凑的间距
-        "    border-bottom: 1px solid transparent;"
-        "    min-height: 20px;"    // 设置最小高度
-        "    max-height: 20px;"    // 设置最大高度
+        "    padding: 5px 8px;"
+        "    border-bottom: 1px solid #E0E0E0;"  /* 每个项目之间的分隔线 */
+        "    min-height: 28px;"
+        "    max-height: 28px;"
+        "    color: #555555;"
+        "    background-color: #FFFFFF;"  /* 文件默认白色背景 */
         "}"
         "QTreeWidget::item:selected {"
-        "    background-color: #D1D1D1;"
-        "    color: #000000;"
+        "    background-color: #00A663;"
+        "    color: #ffffff;"
         "    border: none;"
+        "    border-bottom: 1px solid #00A663;"  /* 选中时底部边框也变色 */
         "}"
         "QTreeWidget::item:hover:!selected {"
-        "    background-color: #EAEAEA;"
-        "    color: #000000;"
+        "    background-color: #f0f0f0;"
+        "    color: #333333;"
+        "}"
+        "QTreeWidget::item:has-children {"
+        "    font-weight: bold;"
+        "    color: #333333;"
+        "    background-color: #EEEEF0;"  /* 文件夹（有子项的项）使用灰色背景 */
         "}"
         "QTreeWidget::item:focus {"
         "    outline: none;"
@@ -532,6 +693,15 @@ void MainWindow::initFileList()
         "}"
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {"
         "    height: 0px;"
+        "}"
+        // 分支展开/折叠指示器样式
+        "QTreeView::branch:has-children:!has-siblings:closed,"
+        "QTreeView::branch:closed:has-children:has-siblings {"
+        "    border-image: none;"
+        "}"
+        "QTreeView::branch:open:has-children:!has-siblings,"
+        "QTreeView::branch:open:has-children:has-siblings {"
+        "    border-image: none;"
         "}"
         );
 }
