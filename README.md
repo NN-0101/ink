@@ -7,7 +7,7 @@
 ![Version](https://img.shields.io/badge/version-0.1.0-blue)
 ![Qt](https://img.shields.io/badge/Qt-5%2F6-green)
 ![License](https://img.shields.io/badge/license-MIT-brightgreen)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%%20%7C%-lightgrey)
+![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
 </div>
 
