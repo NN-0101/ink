@@ -142,7 +142,6 @@ private:
     // 右键菜单动作
     QAction *removeFileAct;
     QAction *openFileLocationAct;
-    QMenu *openTerminalMenu;
     QAction *openCmdAct;
     QAction *openGitBashAct;
 

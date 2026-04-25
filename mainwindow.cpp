@@ -96,7 +96,6 @@ MainWindow::MainWindow(QWidget *parent)
     , editorContextMenu(nullptr)
     , removeFileAct(nullptr)
     , openFileLocationAct(nullptr)
-    , openTerminalMenu(nullptr)
     , openCmdAct(nullptr)
     , openGitBashAct(nullptr)
 {
@@ -655,18 +654,16 @@ void MainWindow::initFileList()
     fileTreeContextMenu = new QMenu(this);
     removeFileAct = new QAction("移除(&R)", this);
     openFileLocationAct = new QAction("打开文件位置(&L)", this);
-    
-    // 创建终端子菜单
-    openTerminalMenu = new QMenu("打开终端(&T)", this);
-    openCmdAct = new QAction("CMD命令行(&C)", this);
-    openGitBashAct = new QAction("Git Bash(&G)", this);
-    openTerminalMenu->addAction(openCmdAct);
-    openTerminalMenu->addAction(openGitBashAct);
+
+    // 直接创建第一层级的终端菜单项
+    openCmdAct = new QAction("打开 CMD 命令行(&C)", this);
+    openGitBashAct = new QAction("打开 Git Bash(&G)", this);
 
     fileTreeContextMenu->addAction(removeFileAct);
     fileTreeContextMenu->addSeparator();
     fileTreeContextMenu->addAction(openFileLocationAct);
-    fileTreeContextMenu->addMenu(openTerminalMenu);
+    fileTreeContextMenu->addAction(openCmdAct);
+    fileTreeContextMenu->addAction(openGitBashAct);
 
     // 连接上下文菜单动作
     connect(removeFileAct, &QAction::triggered, this, &MainWindow::removeFileFromTree);
@@ -1500,15 +1497,12 @@ void MainWindow::showFileTreeContextMenu(const QPoint &pos)
 {
     QTreeWidgetItem *item = fileTree->itemAt(pos);
     if (!item) return;
-    
+
     QString filePath = item->data(0, Qt::UserRole).toString();
     if (filePath.isEmpty()) return; // 目录项，不显示菜单
-    
+
     m_contextMenuFilePath = filePath;
-    
-    // 更新菜单项状态
-    openTerminalMenu->setEnabled(true);
-    
+
     fileTreeContextMenu->exec(fileTree->viewport()->mapToGlobal(pos));
 }
 
@@ -1517,16 +1511,12 @@ void MainWindow::showEditorContextMenu(const QPoint &pos)
 {
     QPlainTextEdit *editor = getCurrentEditor();
     if (!editor) return;
-    
+
     QString filePath = editor->property("filePath").toString();
     if (filePath.isEmpty()) return;
-    
+
     m_contextMenuFilePath = filePath;
-    
-    // 更新菜单项状态
-    openTerminalMenu->setEnabled(true);
-    
-    // 在编辑器位置显示菜单
+
     fileTreeContextMenu->exec(editor->viewport()->mapToGlobal(pos));
 }
 
@@ -1624,6 +1614,7 @@ void MainWindow::openCmdAtFile()
 }
 
 // 在文件位置打开Git Bash
+// 在文件位置打开Git Bash
 void MainWindow::openGitBashAtFile()
 {
     if (m_contextMenuFilePath.isEmpty()) return;
@@ -1638,43 +1629,23 @@ void MainWindow::openGitBashAtFile()
 
 #ifdef Q_OS_WINDOWS
     QString nativePath = QDir::toNativeSeparators(dirPath);
+    QString gitBashExe = "C:\\0101\\install\\dev\\Git\\git-bash.exe";
 
-    // 查找 Git Bash 的常见路径
-    QStringList gitBashPaths = {
-        "C:\\Program Files\\Git\\git-bash.exe",
-        "C:\\Program Files (x86)\\Git\\git-bash.exe",
-        "C:\\Users\\" + qgetenv("USERNAME") + "\\AppData\\Local\\Programs\\Git\\git-bash.exe"
-    };
+    qDebug() << "Git Bash 路径:" << gitBashExe;
+    qDebug() << "目标目录:" << nativePath;
 
-    QString gitBashExe;
-    for (const QString &path : gitBashPaths) {
-        if (QFile::exists(path)) {
-            gitBashExe = path;
-            break;
-        }
-    }
+    QStringList args;
+    args << "--cd=" + nativePath;
 
-    if (!gitBashExe.isEmpty()) {
-        // 使用 git-bash.exe 的 --cd 参数
-        QStringList args;
-        args << "--cd=" + nativePath;
+    bool started = QProcess::startDetached(gitBashExe, args);
 
-        QProcess::startDetached(gitBashExe, args);
-    } else {
-        // 备用方案：尝试在 CMD 中启动 bash
-        QStringList args;
-        args << "/C" << "start" << "bash.exe" << "--login" << "-i";
+    qDebug() << "启动结果:" << (started ? "成功" : "失败");
 
-        // 设置工作目录
-        QProcess process;
-        process.setWorkingDirectory(dirPath);
-        process.startDetached("cmd.exe", args);
-
-        if (process.error() == QProcess::FailedToStart) {
-            QMessageBox::information(this, "提示",
-                                     "未找到 Git Bash。\n"
-                                     "请安装 Git for Windows (https://git-scm.com)");
-        }
+    if (!started) {
+        QMessageBox::warning(this, "错误",
+                             QString("无法启动 Git Bash\n路径: %1\n目录: %2")
+                                 .arg(gitBashExe)
+                                 .arg(nativePath));
     }
 
 #elif defined(Q_OS_MAC)
@@ -1686,5 +1657,4 @@ void MainWindow::openGitBashAtFile()
     QProcess::startDetached(command);
 #endif
 }
-
 
