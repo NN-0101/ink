@@ -936,16 +936,24 @@ void MainWindow::openFileFromPath(const QString &filePath)
     }
 
     // 根据文件类型设置是否显示缩进参考线
-    if (filePath.endsWith(".cpp") || filePath.endsWith(".h") ||
-        filePath.endsWith(".py") || filePath.endsWith(".java") ||
-        filePath.endsWith(".js") || filePath.endsWith(".cs")) {
-        if (lineNumberEditor) {
-            lineNumberEditor->setShowIndentationGuides(true);
+    QStringList codeExtensions = {
+        "cpp", "h", "hpp", "hxx", "c", "cc",
+        "py", "pyw", "pyi",
+        "java", "js", "jsx", "ts", "tsx",
+        "cs", "rs", "go", "swift", "kt", "kts",
+        "yaml", "yml", "json", "xml", "sql"
+    };
+
+    bool isCodeFile = false;
+    for (const QString &ext : codeExtensions) {
+        if (filePath.endsWith("." + ext)) {
+            isCodeFile = true;
+            break;
         }
-    } else {
-        if (lineNumberEditor) {
-            lineNumberEditor->setShowIndentationGuides(false);
-        }
+    }
+
+    if (lineNumberEditor) {
+        lineNumberEditor->setShowIndentationGuides(isCodeFile);
     }
 
     QFileInfo fileInfo(filePath);
