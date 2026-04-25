@@ -35,6 +35,7 @@
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <QStringConverter>
+#include <qlineedit.h>
 #endif
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *event)
@@ -168,6 +169,9 @@ MainWindow::MainWindow(QWidget *parent)
     // 加载设置
     QSettings settings("INK", "Settings");
     restoreGeometry(settings.value("geometry").toByteArray());
+    // 从配置加载 Git Bash 路径
+    m_gitBashPath = settings.value("GitBashPath", "").toString();
+
     mainSplitter->restoreState(settings.value("splitterState").toByteArray());
     previewVisible = settings.value("previewVisible", false).toBool();
     togglePreviewAct->setChecked(previewVisible);
@@ -1614,7 +1618,6 @@ void MainWindow::openCmdAtFile()
 }
 
 // 在文件位置打开Git Bash
-// 在文件位置打开Git Bash
 void MainWindow::openGitBashAtFile()
 {
     if (m_contextMenuFilePath.isEmpty()) return;
@@ -1627,25 +1630,77 @@ void MainWindow::openGitBashAtFile()
         return;
     }
 
-#ifdef Q_OS_WINDOWS
-    QString nativePath = QDir::toNativeSeparators(dirPath);
-    QString gitBashExe = "C:\\0101\\install\\dev\\Git\\git-bash.exe";
+    // 获取 Git Bash 路径
+    QString gitBashPath = getGitBashPath();
 
-    qDebug() << "Git Bash 路径:" << gitBashExe;
+#ifdef Q_OS_WINDOWS
+    // 检查是否配置过 Git Bash 路径
+    if (gitBashPath.isEmpty()) {
+        // 未配置，提示用户配置
+        QMessageBox::StandardButton reply = QMessageBox::question(
+            this,
+            "配置 Git Bash",
+            "您还未配置 Git Bash 路径，是否现在配置？",
+            QMessageBox::Yes | QMessageBox::No
+            );
+
+        if (reply == QMessageBox::Yes) {
+            configureGitBashPath();
+            // 重新获取配置后的路径
+            gitBashPath = getGitBashPath();
+            if (gitBashPath.isEmpty()) {
+                return; // 用户取消配置
+            }
+        } else {
+            return;
+        }
+    }
+
+    // 检查配置的路径是否有效
+    if (!QFile::exists(gitBashPath)) {
+        QMessageBox::StandardButton reply = QMessageBox::warning(
+            this,
+            "路径无效",
+            QString("配置的 Git Bash 路径无效:\n%1\n\n是否重新配置？").arg(gitBashPath),
+            QMessageBox::Yes | QMessageBox::No
+            );
+
+        if (reply == QMessageBox::Yes) {
+            configureGitBashPath();
+            // 重新获取配置后的路径
+            gitBashPath = getGitBashPath();
+            if (gitBashPath.isEmpty() || !QFile::exists(gitBashPath)) {
+                return;
+            }
+        } else {
+            return;
+        }
+    }
+
+    QString nativePath = QDir::toNativeSeparators(dirPath);
+
+    qDebug() << "Git Bash 路径:" << gitBashPath;
     qDebug() << "目标目录:" << nativePath;
 
     QStringList args;
     args << "--cd=" + nativePath;
 
-    bool started = QProcess::startDetached(gitBashExe, args);
+    bool started = QProcess::startDetached(gitBashPath, args);
 
     qDebug() << "启动结果:" << (started ? "成功" : "失败");
 
     if (!started) {
-        QMessageBox::warning(this, "错误",
-                             QString("无法启动 Git Bash\n路径: %1\n目录: %2")
-                                 .arg(gitBashExe)
-                                 .arg(nativePath));
+        QMessageBox msgBox(this);
+        msgBox.setWindowTitle("启动失败");
+        msgBox.setText(QString("无法启动 Git Bash\n\n路径: %1\n目录: %2\n\n是否重新配置路径？")
+                           .arg(gitBashPath)
+                           .arg(nativePath));
+        msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+        msgBox.setIcon(QMessageBox::Warning);
+
+        if (msgBox.exec() == QMessageBox::Yes) {
+            configureGitBashPath();
+        }
     }
 
 #elif defined(Q_OS_MAC)
@@ -1656,5 +1711,142 @@ void MainWindow::openGitBashAtFile()
     QString command = QString("%1 -e 'cd \"%2\"; bash'").arg(terminal).arg(dirPath);
     QProcess::startDetached(command);
 #endif
+}
+
+// 配置 Git Bash 路径
+void MainWindow::configureGitBashPath()
+{
+    // 默认路径
+    QString defaultPath = m_gitBashPath.isEmpty() ?
+                              "C:\\0101\\install\\dev\\Git\\git-bash.exe" :
+                              m_gitBashPath;
+
+    // 创建对话框
+    QDialog dialog(this);
+    dialog.setWindowTitle("配置 Git Bash 路径");
+    dialog.setFixedSize(500, 120);
+    dialog.setStyleSheet(
+        "QDialog {"
+        "    background-color: #f5f5f5;"
+        "}"
+        "QLabel {"
+        "    color: #333333;"
+        "    font-size: 10pt;"
+        "}"
+        "QLineEdit {"
+        "    padding: 5px;"
+        "    border: 1px solid #d0d0d0;"
+        "    border-radius: 3px;"
+        "    background-color: #ffffff;"
+        "    color: #333333;"
+        "    font-size: 10pt;"
+        "}"
+        "QPushButton {"
+        "    padding: 5px 15px;"
+        "    background-color: #00A663;"
+        "    color: white;"
+        "    border: none;"
+        "    border-radius: 3px;"
+        "    font-size: 10pt;"
+        "}"
+        "QPushButton:hover {"
+        "    background-color: #008052;"
+        "}"
+        );
+
+    QVBoxLayout *layout = new QVBoxLayout(&dialog);
+    layout->setSpacing(10);
+    layout->setContentsMargins(20, 20, 20, 20);
+
+    QLabel *label = new QLabel("请输入 Git Bash (git-bash.exe) 的完整路径：", &dialog);
+    layout->addWidget(label);
+
+    QHBoxLayout *inputLayout = new QHBoxLayout();
+    QLineEdit *pathEdit = new QLineEdit(defaultPath, &dialog);
+    QPushButton *browseBtn = new QPushButton("浏览...", &dialog);
+    browseBtn->setFixedWidth(80);
+
+    inputLayout->addWidget(pathEdit);
+    inputLayout->addWidget(browseBtn);
+    layout->addLayout(inputLayout);
+
+    QHBoxLayout *buttonLayout = new QHBoxLayout();
+    buttonLayout->addStretch();
+
+    QPushButton *okBtn = new QPushButton("确定", &dialog);
+    QPushButton *cancelBtn = new QPushButton("取消", &dialog);
+    cancelBtn->setStyleSheet(
+        "QPushButton {"
+        "    background-color: #f0f0f0;"
+        "    color: #333333;"
+        "    border: 1px solid #d0d0d0;"
+        "}"
+        "QPushButton:hover {"
+        "    background-color: #e0e0e0;"
+        "}"
+        );
+
+    buttonLayout->addWidget(okBtn);
+    buttonLayout->addWidget(cancelBtn);
+    layout->addLayout(buttonLayout);
+
+    // 浏览按钮点击事件
+    connect(browseBtn, &QPushButton::clicked, [&]() {
+        QString filePath = QFileDialog::getOpenFileName(
+            &dialog,
+            "选择 Git Bash 可执行文件",
+            QFileInfo(pathEdit->text()).absolutePath(),
+            "可执行文件 (*.exe);;所有文件 (*.*)"
+            );
+        if (!filePath.isEmpty()) {
+            pathEdit->setText(filePath);
+        }
+    });
+
+    // 确定按钮
+    connect(okBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
+    connect(cancelBtn, &QPushButton::clicked, &dialog, &QDialog::reject);
+
+    if (dialog.exec() == QDialog::Accepted) {
+        QString newPath = pathEdit->text().trimmed();
+
+        if (!newPath.isEmpty()) {
+            // 验证路径
+            if (!QFile::exists(newPath)) {
+                QMessageBox::warning(this, "路径无效",
+                                     QString("指定的文件不存在:\n%1\n\n请确认路径是否正确。").arg(newPath));
+                return;
+            }
+
+            // 保存到设置
+            m_gitBashPath = newPath;
+            QSettings settings("INK", "Settings");
+            settings.setValue("GitBashPath", m_gitBashPath);
+            settings.sync();
+
+            QMessageBox::information(this, "配置成功",
+                                     QString("Git Bash 路径已保存:\n%1").arg(m_gitBashPath));
+        }
+    }
+}
+
+
+// 获取 Git Bash 路径（会检查配置）
+QString MainWindow::getGitBashPath()
+{
+    QSettings settings("INK", "Settings");
+    QString savedPath = settings.value("GitBashPath", "").toString();
+
+    // 如果已配置且路径存在
+    if (!savedPath.isEmpty() && QFile::exists(savedPath)) {
+        return savedPath;
+    }
+
+    // 如果已配置但路径不存在
+    if (!savedPath.isEmpty() && !QFile::exists(savedPath)) {
+        return savedPath; // 返回已保存的路径，让调用者处理错误
+    }
+
+    return QString(); // 未配置
 }
 

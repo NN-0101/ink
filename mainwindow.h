@@ -82,6 +82,9 @@ private slots:
     void openCmdAtFile();
     void openGitBashAtFile();
 
+    void configureGitBashPath();
+    QString getGitBashPath();
+
 private:
     // 初始化函数
     void initUI();
@@ -159,6 +162,9 @@ private:
 
     // 上下文菜单状态
     QString m_contextMenuFilePath;
+
+    // 存储 Git Bash 路径
+    QString m_gitBashPath;
 };
 
 #endif // MAINWINDOW_H
