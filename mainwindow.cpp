@@ -1765,6 +1765,7 @@ void MainWindow::configureGitBashPath()
     QLineEdit *pathEdit = new QLineEdit(defaultPath, &dialog);
     QPushButton *browseBtn = new QPushButton("浏览...", &dialog);
     browseBtn->setFixedWidth(80);
+    pathEdit->setFixedHeight(25);
 
     inputLayout->addWidget(pathEdit);
     inputLayout->addWidget(browseBtn);
@@ -1775,6 +1776,8 @@ void MainWindow::configureGitBashPath()
 
     QPushButton *okBtn = new QPushButton("确定", &dialog);
     QPushButton *cancelBtn = new QPushButton("取消", &dialog);
+    okBtn->setFixedWidth(80);
+    cancelBtn->setFixedHeight(25);
     cancelBtn->setStyleSheet(
         "QPushButton {"
         "    background-color: #f0f0f0;"
