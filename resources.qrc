@@ -2,5 +2,8 @@
     <qresource prefix="/icons">
         <file alias="icon">images/my-icon.png</file>
         <file alias="icon1">images/icon-1.png</file>
+        <file alias="expand">images/expand.png</file>
+        <file alias="fold">images/fold.png</file>
+        <file alias="location">images/location.png</file>
     </qresource>
 </RCC>
