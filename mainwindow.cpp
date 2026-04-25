@@ -171,6 +171,8 @@ MainWindow::MainWindow(QWidget *parent)
     restoreGeometry(settings.value("geometry").toByteArray());
     // 从配置加载 Git Bash 路径
     m_gitBashPath = settings.value("GitBashPath", "").toString();
+    // 加载上次打开的目录
+    m_lastOpenedDir = settings.value("LastOpenedDir", "").toString();
 
     mainSplitter->restoreState(settings.value("splitterState").toByteArray());
     previewVisible = settings.value("previewVisible", false).toBool();
@@ -213,6 +215,7 @@ MainWindow::~MainWindow()
     settings.setValue("geometry", saveGeometry());
     settings.setValue("splitterState", mainSplitter->saveState());
     settings.setValue("previewVisible", previewVisible);
+    settings.setValue("LastOpenedDir", m_lastOpenedDir);
 
     // 保存当前打开的文件列表
     QStringList openFiles;
@@ -747,8 +750,11 @@ void MainWindow::initConnections()
 
     // 使用lambda解决openFile名称冲突
     connect(openAct, &QAction::triggered, this, [this]() {
+        // 获取上次打开的目录，如果没有则使用用户主目录
+        QString startDir = m_lastOpenedDir.isEmpty() ? QDir::homePath() : m_lastOpenedDir;
+
         QString filePath = QFileDialog::getOpenFileName(this, "打开文件",
-                                                        QDir::homePath(),
+                                                        startDir,
                                                         "所有文件 (*.*);;"
                                                         "文本文件 (*.txt);;"
                                                         "C++文件 (*.cpp *.h *.hpp);;"
@@ -756,6 +762,10 @@ void MainWindow::initConnections()
                                                         "Python文件 (*.py);;"
                                                         "JavaScript文件 (*.js)");
         if (!filePath.isEmpty()) {
+            // 保存文件所在目录
+            QFileInfo fileInfo(filePath);
+            m_lastOpenedDir = fileInfo.absolutePath();
+
             openFileFromPath(filePath);
         }
     });
@@ -1017,8 +1027,11 @@ bool MainWindow::saveFileAs()
     QPlainTextEdit *editor = getCurrentEditor();
     if (!editor) return false;
 
+    // 使用上次打开的目录，如果没有则使用用户主目录
+    QString startDir = m_lastOpenedDir.isEmpty() ? QDir::homePath() : m_lastOpenedDir;
+
     QString filePath = QFileDialog::getSaveFileName(this, "另存为",
-                                                    QDir::homePath(),
+                                                    startDir,
                                                     "所有文件 (*.*);;"
                                                     "文本文件 (*.txt);;"
                                                     "C++文件 (*.cpp *.h *.hpp);;"
@@ -1029,6 +1042,7 @@ bool MainWindow::saveFileAs()
 
     editor->setProperty("filePath", filePath);
     QFileInfo fileInfo(filePath);
+    m_lastOpenedDir = fileInfo.absolutePath();
     tabWidget->setTabText(tabWidget->currentIndex(), fileInfo.fileName());
 
     // 设置文件名以启用语法高亮

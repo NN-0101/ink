@@ -165,6 +165,9 @@ private:
 
     // 存储 Git Bash 路径
     QString m_gitBashPath;
+
+    // 上次打开文件的目录
+    QString m_lastOpenedDir;
 };
 
 #endif // MAINWINDOW_H
