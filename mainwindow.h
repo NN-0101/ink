@@ -74,6 +74,14 @@ private slots:
     void showFindDialog();
     void showReplaceDialog();
 
+    // 右键菜单槽函数
+    void showFileTreeContextMenu(const QPoint &pos);
+    void showEditorContextMenu(const QPoint &pos);
+    void removeFileFromTree();
+    void openFileLocation();
+    void openCmdAtFile();
+    void openGitBashAtFile();
+
 private:
     // 初始化函数
     void initUI();
@@ -89,6 +97,8 @@ private:
     bool maybeSave();
     QString getCurrentFilePath() const;
     QPlainTextEdit* getCurrentEditor() const;
+    QString getSelectedFilePath() const;
+    bool isExecutableFile(const QString &filePath) const;
 
     // UI 组件
     QSplitter *mainSplitter;
@@ -108,6 +118,10 @@ private:
     QMenu *viewMenu;
     QMenu *helpMenu;
 
+    // 上下文菜单
+    QMenu *fileTreeContextMenu;
+    QMenu *editorContextMenu;
+
     // 动作
     QAction *newAct;
     QAction *openAct;
@@ -125,6 +139,13 @@ private:
     QAction *toggleFileListAct;
     QAction *togglePreviewAct;
 
+    // 右键菜单动作
+    QAction *removeFileAct;
+    QAction *openFileLocationAct;
+    QMenu *openTerminalMenu;
+    QAction *openCmdAct;
+    QAction *openGitBashAct;
+
     FindReplaceDialog *m_findReplaceDialog;
     FileManage *m_fileManage;
 
@@ -136,6 +157,9 @@ private:
 
     // 状态
     bool previewVisible;
+
+    // 上下文菜单状态
+    QString m_contextMenuFilePath;
 };
 
 #endif // MAINWINDOW_H

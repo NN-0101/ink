@@ -238,6 +238,8 @@ void FileManage::removeFileFromTree(const QString &filePath, QTreeWidget *fileTr
 {
     if (!fileTree) return;
 
+    qDebug() << "removeFileFromTree called for:" << filePath;
+
     QFileInfo fileInfo(filePath);
     QString displayName = fileInfo.fileName();
 
@@ -255,7 +257,17 @@ void FileManage::removeFileFromTree(const QString &filePath, QTreeWidget *fileTr
             // 递归清理空目录
             cleanupEmptyDirectories(parent);
         }
+    } else {
+        qDebug() << "File item not found in tree for:" << filePath;
     }
+
+    // 从最近文件列表中移除并保存
+    qDebug() << "Recent files before removal:" << m_recentFiles;
+    removeFromRecentFiles(filePath);
+    qDebug() << "Recent files after removal:" << m_recentFiles;
+    
+    // 保存到设置
+    saveFileList(QStringList(), m_recentFiles);
 
     emit fileTreeUpdated();
 }
@@ -270,14 +282,29 @@ void FileManage::cleanupEmptyDirectories(QTreeWidgetItem *item)
         return; // 文件项
     }
 
-    // 如果没有子项且不是根节点，移除该项
-    if (item->childCount() == 0 && item->parent()) {
-        QTreeWidgetItem *parent = item->parent();
-        parent->removeChild(item);
-        delete item;
+    qDebug() << "cleanupEmptyDirectories:" << item->text(0) << "childCount:" << item->childCount() << "parent:" << (item->parent() ? item->parent()->text(0) : "null");
 
-        // 继续清理父级目录
-        cleanupEmptyDirectories(parent);
+    // 如果没有子项，检查是否可以移除
+    if (item->childCount() == 0) {
+        QTreeWidgetItem *parent = item->parent();
+        if (parent) {
+            // 有父节点，可以移除（普通目录）
+            qDebug() << "Removing empty directory:" << item->text(0) << "parent:" << parent->text(0);
+            parent->removeChild(item);
+            delete item;
+
+            // 继续清理父级目录
+            cleanupEmptyDirectories(parent);
+        } else {
+            // 没有父节点，说明是根节点的直接子项（如盘符）
+            // 我们需要从树中移除这个空盘符
+            QTreeWidget *treeWidget = item->treeWidget();
+            if (treeWidget) {
+                qDebug() << "Removing empty root-level item (drive/directory):" << item->text(0);
+                treeWidget->invisibleRootItem()->removeChild(item);
+                delete item;
+            }
+        }
     }
 }
 
@@ -331,7 +358,8 @@ void FileManage::saveFileList(const QStringList &openFiles, const QStringList &r
     // 合并现有文件列表，去重并保持最近的文件在前面
     QStringList allFiles = openFiles;
     for (const QString &file : recentFiles) {
-        if (!allFiles.contains(file) && fileExists(file)) {
+        if (!allFiles.contains(file)) {
+            // 保存时不检查文件是否存在，这样移除的文件才能被真正移除
             allFiles.append(file);
         }
     }
@@ -345,7 +373,7 @@ void FileManage::saveFileList(const QStringList &openFiles, const QStringList &r
     m_settings->setValue("recentFiles", allFiles);
     m_recentFiles = allFiles;
 
-    qDebug() << "Saved files:" << allFiles.size();
+    qDebug() << "Saved files:" << allFiles.size() << allFiles;
     emit recentFilesUpdated(allFiles);
 }
 

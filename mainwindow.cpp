@@ -28,7 +28,10 @@
 #include <QDebug>
 #include <QMap>
 #include <QIcon>
+#include <QDesktopServices>
 #include <QShortcut>
+#include <QProcess>
+#include <QMenu>
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <QStringConverter>
@@ -89,9 +92,16 @@ MainWindow::MainWindow(QWidget *parent)
     , previewVisible(false)
     , m_findReplaceDialog(nullptr)
     , m_fileManage(new FileManage(this))
+    , fileTreeContextMenu(nullptr)
+    , editorContextMenu(nullptr)
+    , removeFileAct(nullptr)
+    , openFileLocationAct(nullptr)
+    , openTerminalMenu(nullptr)
+    , openCmdAct(nullptr)
+    , openGitBashAct(nullptr)
 {
     // 设置窗口图标
-    setWindowIcon(QIcon(":/icons/icon"));
+    setWindowIcon(QIcon(":/icons/icon1"));
     
     // 设置窗口样式（整体亮色主题）
     setStyleSheet(
@@ -124,7 +134,7 @@ MainWindow::MainWindow(QWidget *parent)
         "    padding: 4px 20px;"
         "}"
         "QMenu::item:selected {"
-        "    background-color: #007acc;"
+        "    background-color: #00A663;"
         "    color: #ffffff;"
         "}"
         "QMenu::separator {"
@@ -360,8 +370,8 @@ void MainWindow::initUI()
         "}"
         "QTabBar::tab:selected {"
         "    background-color: #ffffff;"
-        "    color: #007acc;"
-        "    border-bottom: 2px solid #007acc;"
+        "    color: #00A663;"
+        "    border-bottom: 2px solid #00A663;"
         "}"
         "QTabBar::tab:hover:!selected {"
         "    background-color: #e0e0e0;"
@@ -641,6 +651,29 @@ void MainWindow::initFileList()
     // 初始为空，不需要添加任何项目
     fileTree->clear();
 
+    // 创建文件树上下文菜单
+    fileTreeContextMenu = new QMenu(this);
+    removeFileAct = new QAction("移除(&R)", this);
+    openFileLocationAct = new QAction("打开文件位置(&L)", this);
+    
+    // 创建终端子菜单
+    openTerminalMenu = new QMenu("打开终端(&T)", this);
+    openCmdAct = new QAction("CMD命令行(&C)", this);
+    openGitBashAct = new QAction("Git Bash(&G)", this);
+    openTerminalMenu->addAction(openCmdAct);
+    openTerminalMenu->addAction(openGitBashAct);
+
+    fileTreeContextMenu->addAction(removeFileAct);
+    fileTreeContextMenu->addSeparator();
+    fileTreeContextMenu->addAction(openFileLocationAct);
+    fileTreeContextMenu->addMenu(openTerminalMenu);
+
+    // 连接上下文菜单动作
+    connect(removeFileAct, &QAction::triggered, this, &MainWindow::removeFileFromTree);
+    connect(openFileLocationAct, &QAction::triggered, this, &MainWindow::openFileLocation);
+    connect(openCmdAct, &QAction::triggered, this, &MainWindow::openCmdAtFile);
+    connect(openGitBashAct, &QAction::triggered, this, &MainWindow::openGitBashAtFile);
+
     // 设置文件树样式 - 亮色主题
     fileTree->setStyleSheet(
         "QTreeWidget {"
@@ -762,6 +795,10 @@ void MainWindow::initConnections()
     connect(tabWidget, &QTabWidget::tabCloseRequested, this, &MainWindow::closeTab);
     connect(tabWidget, &QTabWidget::currentChanged, this, &MainWindow::currentTabChanged);
 
+    // 右键菜单连接
+    connect(fileTree, &QTreeWidget::customContextMenuRequested, this, &MainWindow::showFileTreeContextMenu);
+    fileTree->setContextMenuPolicy(Qt::CustomContextMenu);
+
     QShortcut *findNextShortcut = new QShortcut(QKeySequence("F3"), this);
     connect(findNextShortcut, &QShortcut::activated, this, [this]() {
         if (m_findReplaceDialog && m_findReplaceDialog->isVisible()) {
@@ -817,6 +854,9 @@ QPlainTextEdit* MainWindow::createEditor()
     // 为编辑器安装事件过滤器
     editor->installEventFilter(this);
 
+    // 设置编辑器的上下文菜单
+    editor->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(editor, &QPlainTextEdit::customContextMenuRequested, this, &MainWindow::showEditorContextMenu);
 
     return editor;
 }
@@ -1420,6 +1460,231 @@ QPlainTextEdit* MainWindow::getCurrentEditor() const
         return nullptr;
     }
     return qobject_cast<QPlainTextEdit*>(tabWidget->currentWidget());
+}
+
+// 获取选中的文件路径
+QString MainWindow::getSelectedFilePath() const
+{
+    QTreeWidgetItem *item = fileTree->currentItem();
+    if (item) {
+        QString filePath = item->data(0, Qt::UserRole).toString();
+        if (!filePath.isEmpty()) {
+            return filePath;
+        }
+    }
+    return QString();
+}
+
+// 检查是否为可执行文件
+bool MainWindow::isExecutableFile(const QString &filePath) const
+{
+    QFileInfo fileInfo(filePath);
+    QString suffix = fileInfo.suffix().toLower();
+    
+    // Windows 可执行文件
+    if (suffix == "exe" || suffix == "bat" || suffix == "cmd" || suffix == "com" || suffix == "msi") {
+        return true;
+    }
+    
+    // 脚本文件
+    if (suffix == "sh" || suffix == "bash" || suffix == "ps1") {
+        return true;
+    }
+    
+    // 检查文件是否具有可执行权限（在 Unix 系统上）
+    return fileInfo.isExecutable();
+}
+
+// 文件树上下文菜单
+void MainWindow::showFileTreeContextMenu(const QPoint &pos)
+{
+    QTreeWidgetItem *item = fileTree->itemAt(pos);
+    if (!item) return;
+    
+    QString filePath = item->data(0, Qt::UserRole).toString();
+    if (filePath.isEmpty()) return; // 目录项，不显示菜单
+    
+    m_contextMenuFilePath = filePath;
+    
+    // 更新菜单项状态
+    openTerminalMenu->setEnabled(true);
+    
+    fileTreeContextMenu->exec(fileTree->viewport()->mapToGlobal(pos));
+}
+
+// 编辑器上下文菜单（暂时使用文件树的菜单）
+void MainWindow::showEditorContextMenu(const QPoint &pos)
+{
+    QPlainTextEdit *editor = getCurrentEditor();
+    if (!editor) return;
+    
+    QString filePath = editor->property("filePath").toString();
+    if (filePath.isEmpty()) return;
+    
+    m_contextMenuFilePath = filePath;
+    
+    // 更新菜单项状态
+    openTerminalMenu->setEnabled(true);
+    
+    // 在编辑器位置显示菜单
+    fileTreeContextMenu->exec(editor->viewport()->mapToGlobal(pos));
+}
+
+// 从文件树中移除文件
+void MainWindow::removeFileFromTree()
+{
+    if (m_contextMenuFilePath.isEmpty()) return;
+    
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, "移除文件", 
+                                  "确定要从文件列表中移除该文件吗？\n此操作不会删除实际文件。",
+                                  QMessageBox::Yes | QMessageBox::No);
+    
+    if (reply == QMessageBox::Yes) {
+        m_fileManage->removeFileFromTree(m_contextMenuFilePath, fileTree);
+    }
+}
+
+// 打开文件位置
+void MainWindow::openFileLocation()
+{
+    if (m_contextMenuFilePath.isEmpty()) return;
+    
+    QFileInfo fileInfo(m_contextMenuFilePath);
+    if (!fileInfo.exists()) {
+        QMessageBox::warning(this, "错误", "文件不存在或已被移动。");
+        return;
+    }
+    
+    qDebug() << "openFileLocation: filePath =" << m_contextMenuFilePath;
+    qDebug() << "fileInfo.exists() =" << fileInfo.exists();
+    qDebug() << "absoluteFilePath =" << fileInfo.absoluteFilePath();
+    qDebug() << "absolutePath =" << fileInfo.absolutePath();
+    
+#ifdef Q_OS_WINDOWS
+    // Windows: 在资源管理器中打开文件所在目录并选中文件
+    // explorer /select,"C:\path\to\file with spaces.txt"
+    QString nativePath = QDir::toNativeSeparators(fileInfo.absoluteFilePath());
+    QString command = "explorer";
+    QStringList args;
+    args << "/select," << nativePath;  // 分开传递两个参数
+    qDebug() << "Windows explorer command: explorer /select,\"" + nativePath + "\"";
+    
+    // 使用 QProcess::startDetached 启动
+    bool success = QProcess::startDetached(command, args);
+    if (!success) {
+        qDebug() << "Failed to start explorer process";
+        // 备选方案：打开目录
+        QDesktopServices::openUrl(QUrl::fromLocalFile(fileInfo.absolutePath()));
+    }
+#elif defined(Q_OS_MAC)
+    // macOS 使用 open 命令
+    QString command = "open -R \"" + fileInfo.absoluteFilePath() + "\"";
+    qDebug() << "macOS open command:" << command;
+    QProcess::startDetached(command);
+#else
+    // Linux 使用文件管理器
+    QString dirPath = fileInfo.absolutePath();
+    QString command = "xdg-open \"" + dirPath + "\"";
+    qDebug() << "Linux xdg-open command:" << command;
+    QProcess::startDetached(command);
+#endif
+}
+
+// 在文件位置打开CMD命令行
+void MainWindow::openCmdAtFile()
+{
+    if (m_contextMenuFilePath.isEmpty()) return;
+
+    QFileInfo fileInfo(m_contextMenuFilePath);
+    QString dirPath = fileInfo.absolutePath();
+
+    if (!QDir(dirPath).exists()) {
+        QMessageBox::warning(this, "错误", "目录不存在或无法访问。");
+        return;
+    }
+
+#ifdef Q_OS_WINDOWS
+    QString nativePath = QDir::toNativeSeparators(dirPath);
+
+    // 使用 start 命令打开新的 CMD 窗口
+    QStringList args;
+    args << "/C" << "start" << "cmd.exe" << "/K" << QString("cd /d %1").arg(nativePath);
+
+    QProcess::startDetached("cmd.exe", args);
+
+#elif defined(Q_OS_MAC)
+    QString command = "open -a Terminal \"" + dirPath + "\"";
+    QProcess::startDetached(command);
+#else
+    QString terminal = qEnvironmentVariable("TERM", "xterm");
+    QString command = QString("%1 -e 'cd \"%2\"; bash'").arg(terminal).arg(dirPath);
+    QProcess::startDetached(command);
+#endif
+}
+
+// 在文件位置打开Git Bash
+void MainWindow::openGitBashAtFile()
+{
+    if (m_contextMenuFilePath.isEmpty()) return;
+
+    QFileInfo fileInfo(m_contextMenuFilePath);
+    QString dirPath = fileInfo.absolutePath();
+
+    if (!QDir(dirPath).exists()) {
+        QMessageBox::warning(this, "错误", "目录不存在或无法访问。");
+        return;
+    }
+
+#ifdef Q_OS_WINDOWS
+    QString nativePath = QDir::toNativeSeparators(dirPath);
+
+    // 查找 Git Bash 的常见路径
+    QStringList gitBashPaths = {
+        "C:\\Program Files\\Git\\git-bash.exe",
+        "C:\\Program Files (x86)\\Git\\git-bash.exe",
+        "C:\\Users\\" + qgetenv("USERNAME") + "\\AppData\\Local\\Programs\\Git\\git-bash.exe"
+    };
+
+    QString gitBashExe;
+    for (const QString &path : gitBashPaths) {
+        if (QFile::exists(path)) {
+            gitBashExe = path;
+            break;
+        }
+    }
+
+    if (!gitBashExe.isEmpty()) {
+        // 使用 git-bash.exe 的 --cd 参数
+        QStringList args;
+        args << "--cd=" + nativePath;
+
+        QProcess::startDetached(gitBashExe, args);
+    } else {
+        // 备用方案：尝试在 CMD 中启动 bash
+        QStringList args;
+        args << "/C" << "start" << "bash.exe" << "--login" << "-i";
+
+        // 设置工作目录
+        QProcess process;
+        process.setWorkingDirectory(dirPath);
+        process.startDetached("cmd.exe", args);
+
+        if (process.error() == QProcess::FailedToStart) {
+            QMessageBox::information(this, "提示",
+                                     "未找到 Git Bash。\n"
+                                     "请安装 Git for Windows (https://git-scm.com)");
+        }
+    }
+
+#elif defined(Q_OS_MAC)
+    QString command = "open -a Terminal \"" + dirPath + "\"";
+    QProcess::startDetached(command);
+#else
+    QString terminal = qEnvironmentVariable("TERM", "xterm");
+    QString command = QString("%1 -e 'cd \"%2\"; bash'").arg(terminal).arg(dirPath);
+    QProcess::startDetached(command);
+#endif
 }
 
 
