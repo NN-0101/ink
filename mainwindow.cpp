@@ -1539,17 +1539,56 @@ void MainWindow::showEditorContextMenu(const QPoint &pos)
 }
 
 // 从文件树中移除文件
+// 从文件树中移除文件
 void MainWindow::removeFileFromTree()
 {
     if (m_contextMenuFilePath.isEmpty()) return;
-    
+
     QMessageBox::StandardButton reply;
-    reply = QMessageBox::question(this, "移除文件", 
+    reply = QMessageBox::question(this, "移除文件",
                                   "确定要从文件列表中移除该文件吗？\n此操作不会删除实际文件。",
                                   QMessageBox::Yes | QMessageBox::No);
-    
+
     if (reply == QMessageBox::Yes) {
+        // 先检查并关闭编辑器中打开的文件
+        for (int i = 0; i < tabWidget->count(); ++i) {
+            QPlainTextEdit *editor = qobject_cast<QPlainTextEdit*>(tabWidget->widget(i));
+            if (editor && editor->property("filePath").toString() == m_contextMenuFilePath) {
+                // 如果文件已修改，提示保存
+                if (editor->document()->isModified()) {
+                    tabWidget->setCurrentIndex(i);
+                    if (!maybeSave()) {
+                        return;  // 用户取消操作
+                    }
+                }
+                // 关闭标签页
+                tabWidget->removeTab(i);
+                delete editor;
+                break;  // 找到并关闭后退出循环
+            }
+        }
+
+        // 从文件树中移除
         m_fileManage->removeFileFromTree(m_contextMenuFilePath, fileTree);
+
+        // 更新UI状态
+        updateButtonStates();
+        updateWindowTitle();
+        updateStatusBar();
+        updateEditActions();
+
+        // 保存更新后的文件列表
+        QStringList openFiles;
+        for (int i = 0; i < tabWidget->count(); ++i) {
+            QPlainTextEdit *ed = qobject_cast<QPlainTextEdit*>(tabWidget->widget(i));
+            if (ed) {
+                QString fp = ed->property("filePath").toString();
+                if (!fp.isEmpty()) {
+                    openFiles.append(fp);
+                }
+            }
+        }
+        m_fileManage->saveFileList(openFiles, m_fileManage->getRecentFiles());
     }
 }
 
