@@ -32,11 +32,22 @@ bool FileManage::openFile(const QString &filePath, QPlainTextEdit *editor)
         return false;
     }
 
-    QString content = readFileContent(filePath);
-    if (content.isNull()) {
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qDebug() << "Cannot open file for reading:" << filePath;
         return false;
     }
 
+    QTextStream in(&file);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    in.setCodec("UTF-8");
+#else
+    in.setEncoding(QStringConverter::Utf8);
+#endif
+    QString content = in.readAll();
+    file.close();
+
+    // content 可能是空字符串（文件为空），但这不是错误
     if (editor) {
         editor->setPlainText(content);
         editor->document()->setModified(false);
@@ -81,7 +92,7 @@ QString FileManage::readFileContent(const QString &filePath)
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         qDebug() << "Cannot open file for reading:" << filePath;
-        return QString();
+        return QString();  // 返回 null QString
     }
 
     QTextStream in(&file);
