@@ -66,7 +66,7 @@ LineNumberEditor::LineNumberEditor(QWidget *parent)
     setWordWrapMode(QTextOption::NoWrap);
 
     // 设置选中文本背景色（双击选中时的颜色）
-    setStyleSheet("selection-background-color: rgb(207, 207, 207); selection-color: rgb(0, 0, 0);");
+    setStyleSheet("selection-background-color: rgb(205, 205, 205); selection-color: rgb(0, 0, 0);");
 
     updateLineNumberAreaWidth(0);
     highlightCurrentLine();

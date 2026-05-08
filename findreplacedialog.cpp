@@ -28,11 +28,11 @@ FindReplaceDialog::FindReplaceDialog(QWidget *parent)
     // 创建UI组件
     m_findEdit = new QLineEdit(this);
     m_findEdit->setPlaceholderText("查找...");
-    m_findEdit->setStyleSheet("selection-background-color: rgb(207, 207, 207); selection-color: rgb(0, 0, 0);");
+    m_findEdit->setStyleSheet("selection-background-color: rgb(205, 205, 205); selection-color: rgb(0, 0, 0);");
 
     m_replaceEdit = new QLineEdit(this);
     m_replaceEdit->setPlaceholderText("替换为...");
-    m_replaceEdit->setStyleSheet("selection-background-color: rgb(207, 207, 207); selection-color: rgb(0, 0, 0);");
+    m_replaceEdit->setStyleSheet("selection-background-color: rgb(205, 205, 205); selection-color: rgb(0, 0, 0);");
 
     m_caseSensitiveCheck = new QCheckBox("区分大小写(&C)", this);
     m_wholeWordCheck = new QCheckBox("全词匹配(&W)", this);
